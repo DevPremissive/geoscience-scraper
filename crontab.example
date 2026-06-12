@@ -1,0 +1,22 @@
+# Scheduling perpetual national updates
+#
+# Incremental: re-running costs nothing if nothing changed (change-detected via
+# CKAN last_modified + sha256 in manifest.sqlite).
+#
+# Suggested cadence:
+#   - Tenure/claims (fast-moving): daily where the source is ArcGIS (BC MTO, SK, YT).
+#   - CKAN datasets + index rebuild: weekly.
+#   - Assessment-report PDF corpora: monthly (and only after finishing scrape stubs).
+#
+# ---- Linux/macOS cron (crontab -e) — adjust paths/venv ----------------------
+#
+# Daily 06:00 — fast-moving tenure jurisdictions only
+# 0 6 * * *  cd /path/to/canada-geo && .venv/bin/python src/harvest.py --jurisdiction BC SK YT >> ~/canada-geo-lake/logs/daily.log 2>&1
+#
+# Weekly Mon 03:00 — full national core harvest + process + index
+# 0 3 * * 1  cd /path/to/canada-geo && .venv/bin/python src/update_all.py >> ~/canada-geo-lake/logs/weekly.log 2>&1
+#
+# Monthly 1st 04:00 — assessment-report PDF corpora (finished scrapers only)
+# 0 4 1 * *  cd /path/to/canada-geo && .venv/bin/python src/harvest_pdfs.py >> ~/canada-geo-lake/logs/pdfs.log 2>&1
+#
+# ---- macOS launchd / Windows Task Scheduler: wrap src/update_all.py ----------

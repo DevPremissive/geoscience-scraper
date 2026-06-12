@@ -19,6 +19,7 @@ LOG_DIR       = LAKE_ROOT / "logs"
 GPKG_PATH     = PROCESSED_DIR / "geo.gpkg"
 MANIFEST_DB   = LAKE_ROOT / "manifest.sqlite"
 CATALOG_DB    = LAKE_ROOT / "catalog.duckdb"
+CHROMA_DB     = LAKE_ROOT / "chroma_db"
 
 # Formats kept in the "core" (small) harvest. PDFs handled by the scrape connectors.
 CORE_FORMATS = {"shp", "zip", "csv", "tsv", "xlsx", "xls", "kml", "kmz", "geojson",
@@ -32,7 +33,7 @@ CKAN_ACTION_PATH = "/api/3/action"
 ARCGIS_PAGE = 2000
 
 # Politeness — be a good citizen of provincial servers.
-USER_AGENT  = "canada-geo-lake/1.0 (personal research data mirror; contact: you@example.com)"
+USER_AGENT  = "canada-geo-lake/1.0 (personal research data mirror; contact: devpremissive@users.noreply.github.com)"
 REQUEST_GAP = 0.5
 TIMEOUT     = 180
 

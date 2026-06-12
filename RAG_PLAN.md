@@ -279,9 +279,11 @@ vector_store.query("company XYZ mining exploration results", n_results=50)
 
 ---
 
-## Open Questions
+## Design Decisions (confirmed)
 
-1. **Geometry in RAG** — Do we store lat/lng as metadata for spatial filtering in vector queries, or do spatial joins via DuckDB separately?
-2. **Textify templates** — Do we hand-craft templates per layer (best quality) or auto-generate from column names + sample values (fast, less readable)?
-3. **Assessment report metadata** — The scrape stubs only return ID→PDF URL. Do we need a separate metadata enrichment step (parse first page for NTS/company/commodity before embedding)?
-4. **PDF page images** — For scanned PDFs (common in older AFRI reports): use OCR (Tesseract) or skip?
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Textify templates | **Hand-craft per layer** | Higher quality text → better embeddings; effort is one-time per layer |
+| PDF metadata enrichment | **Parse first page** | Extract NTS/company/commodity from PDF text before embedding; DuckDB cross-ref as secondary |
+| Scanned PDFs (OCR) | **Deprioritize** | Older AFRI reports skipped initially; revisit if coverage demands it |
+| Geometry in RAG | **Both** | Store lat/lng as metadata for vector-db radius filtering; use DuckDB spatial for exact GIS joins |

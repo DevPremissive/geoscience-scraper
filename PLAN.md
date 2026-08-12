@@ -9,23 +9,29 @@ ideas carry over: **discover (never hardcode) → snapshot → normalize → ind
 
 ---
 
-## 1. The key architectural insight: three connector types cover all of Canada
+## 1. The key architectural insight: four connector types cover all of Canada (+ US)
 
-You do **not** need 13 bespoke scrapers. Almost every source falls into one of three
-patterns, so the system is a *declarative registry* (`src/sources.py`) feeding three
+You do **not** need 13 bespoke scrapers. Almost every source falls into one of four
+patterns, so the system is a *declarative registry* (`src/sources.py`) feeding four
 generic connectors (`src/connectors/`):
 
 | Connector | What it talks to | Examples (verified) |
 |---|---|---|
-| **ckan** | CKAN open-data portals (identical `package_search` API) | `open.canada.ca` (NRCan — CGMC, CDoGS, geophysics, national tenure), `data.ontario.ca` (mines org), `catalogue.data.gov.bc.ca` |
-| **arcgis** | ArcGIS REST FeatureServers + ArcGIS Hub download items | Saskatchewan (`gis.saskatchewan.ca/egis`, `geohub.saskatchewan.ca`), Yukon, QC SIGÉOM, tenure layers |
+| **ckan** | CKAN open-data portals (identical `package_search` API) | `open.canada.ca` (NRCan — CGMC, CDoGS, geophysics, national tenure), `data.ontario.ca` (mines org), `catalogue.data.gov.bc.ca`, `donneesquebec.ca` (13 SIGÉOM packages) |
+| **arcgis** | ArcGIS REST FeatureServers + MapServer GeoJSON | Yukon (9 MapServer layers), Saskatchewan (SMDI hub + Mineral Expl. FeatureServer), Nunavut (3 layers), NB (Socrata→GeoJSON via open.canada.ca) |
+| **ogsearth** | OGSEarth SuperOverlay KML (Region-based KMZ tile trees) | Ontario (Mining Claims, Alienations, Dispositions, Plans & Permits — 351+ tiles each with polygon Placemarks) |
+| **direct** | Fixed URL downloads (ZIP/SHP/GDB/WFS) | BC MTA (WFS 2.0, sortBy paging), NT mineral claims (ZIP), NS mineral rights (SHP+GDB), USGS MRDS (CSV/JSON), USGS USMIN (per-state SHP) |
 | **scrape** | Legacy assessment-report systems (PDF corpora) | AFRI (ON), ARIS (BC), SMAD (SK), GeoFiles (NL), DCDH (NS), AGS (AB), NTGS (NWT/NU) |
 
-Adding a jurisdiction = adding a dict entry to `sources.py`. No new code.
+Adding a jurisdiction = adding a dict entry to `sources.py`. Usually no new code.
 
 > **Corrections from the source notes:** Saskatchewan's assessment system is **SMAD**
 > (+ **SMDI** deposit index), *not* "MARS". Quebec is **GESTIM** (tenure) + **SIGÉOM**
-> (geoscience). These are fixed in the registry.
+> (geoscience, 13 bulk packages on donneesquebec.ca). Ontario's mining claims are
+> **not** 0-resource metadata packages — they're downloadable via OGSEarth SuperOverlay
+> KMZ tile trees at `geologyontario.mndm.gov.on.ca/mines/data/google/`. The `data.ontario.ca`
+> CKAN records have 0 resources, but the actual data lives at a separate domain with
+> stable paths. These are fixed in the registry.
 
 ---
 
@@ -36,6 +42,8 @@ Adding a jurisdiction = adding a dict entry to `sources.py`. No new code.
   National Mineral Tenure layer, national mineral deposits — all via `open.canada.ca` CKAN.
 - **Provinces/territories:** ON, BC, QC, SK, MB, NL, NS, AB, NB, YT, NT/NU — each with its
   tenure, drill-hole/occurrence, and assessment-report systems mapped.
+- **United States (reference):** USGS MRDS (global mineral sites, 137MB CSV), USGS USMIN
+  (per-state mineral-site SHP), BLM ArcGIS Hub (no public claims API found).
 
 Why federal-first: the CGMC already stitches provincial bedrock maps into one standardized
 layer, and `open.canada.ca` federates many provincial datasets, so one CKAN pass yields a
@@ -99,6 +107,9 @@ nationwide. See `QUERIES.md`.
 3. **Document/RAG extractor** — the AFRI/ARIS/SMAD/GeoFiles PDF corpora feed your local-LLM
    RAG stack to pull intercepts, grades, and economic assumptions, joined back to
    drill-hole geometry — the bridge to NI 43-101 structuring and DCF modelling.
+4. **Tenure analysis** — cross-jurisdiction mineral claim boundary overlay in one map
+   (ON claims from OGSEarth KMZ, YT from MapServer, NU from CIRNAC MapServer, NB from
+   CKAN, etc.), with expiry/status filtering and proximity analysis to known deposits.
 
 ---
 
@@ -126,15 +137,27 @@ python src/harvest_pdfs.py --code BC_ARIS_PDF
   per-system hints, but the actual `enumerate_ids()` / `pdf_url()` for each legacy system
   must be filled in by inspecting that site's network calls (~15 min each with devtools).
   This is deliberate: those endpoints are undocumented JS-app calls that would be wrong if
-  guessed. The structured-data harvest (CKAN + ArcGIS) needs no such step.
-- **A few ArcGIS layer URLs** (QC SIGÉOM à-la-carte, MB MapGallery, NB mapviewer, NT/NU)
-  need their FeatureServer/item IDs confirmed once via `discover` against the live service;
-  the registry notes say exactly where to look.
-- **BC MTA grid and a few tenure layers are too large for whole-province pulls** — chunk by
-  NTS mapsheet / area of interest (noted in the registry).
+  guessed. The structured-data harvest (CKAN + ArcGIS + OGSEarth + direct) needs no such step.
+- **QC GESTIM claims boundaries** are not available via any public API or bulk download.
+  The interactive SIGÉOM web app (`sigeom.mines.gouv.qc.ca`) is the only public viewer.
+  Bulk licensing available from the MRNF for fees.
+- **ON OGSEarth**: the root doc.kml URLs are stable, but the tile names are generated.
+  The `ogsearth` connector parses the root KML's NetworkLink Regions to discover exactly
+  which KMZ tiles exist — no hardcoding needed.
+- **MB MapGallery** has no public ArcGIS REST endpoint or CKAN mirror found. Data is only
+  accessible through the interactive MapGallery web application.
+- **NL mineral claims** have no public API. The GeoFiles interactive map is the only viewer.
+- **AB mineral claims** are administered by the Alberta Energy Regulator with no public
+  geospatial API.
+- **US BLM mining claims**: BLM's MLRS system replaced LR2000, but has no public REST API.
+  Contact `mlrs@blm.gov` for data licensing.
+- **BC MTA grid was already harvested** (42K polygons via WFS) — no chunking needed, the
+  whole-province pull fit in ~70MB.
 
 The CKAN sources (federal CGMC/CDoGS/geophysics/tenure, Ontario's full set, BC MINFILE/
-geology, etc.) and the verified ArcGIS items (SK SMDI) are ready to harvest as shipped.
+geology, QC SIGÉOM bulk on donneesquebec.ca, etc.), the verified ArcGIS items (YT 9 layers,
+SK SMDI, NU 3 layers), the OGSEarth tenure tiles (ON), and the direct downloads (BC MTA WFS,
+NS mineral rights, NT mineral claims, USGS MRDS/USMIN) are all ready to harvest as shipped.
 
 ---
 

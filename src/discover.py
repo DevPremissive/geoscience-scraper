@@ -16,7 +16,7 @@ import argparse, json, sys
 
 import config as C
 import sources as S
-from connectors import ckan, arcgis
+from connectors import ckan, arcgis, wfs, ogsearth, es_scroll
 
 
 def discover_all(only=None):
@@ -30,6 +30,47 @@ def discover_all(only=None):
                 inv.extend(ckan.discover(spec, juris))
             elif ctype == "arcgis":
                 inv.extend(arcgis.discover(spec, juris))
+            elif ctype == "wfs":
+                inv.extend(wfs.discover(spec, juris))
+            elif ctype == "ogsearth":
+                inv.extend(ogsearth.discover(spec, juris))
+            elif ctype == "direct":
+                for code, res in spec.get("resources", {}).items():
+                    inv.append({
+                        "jurisdiction": juris, "connector": "direct",
+                        "code": code, "dataset": code, "resource_id": code,
+                        "resource_name": res.get("resource_name", code),
+                        "format": res.get("format", "dat"),
+                        "url": res["url"],
+                        "last_modified": "",
+                        "size": res.get("size"),
+                        "license": None,
+                        "portal": spec.get("portal"),
+                        "note": res.get("notes", ""),
+                    })
+            elif ctype == "es_scroll":
+                for code, res in spec.get("indexes", {}).items():
+                    info = es_scroll.discover(
+                        endpoint=spec["endpoint"],
+                        index=res["index"],
+                        api_key=spec.get("api_key", ""),
+                    )
+                    inv.append({
+                        "jurisdiction": juris, "connector": "es_scroll",
+                        "code": code, "dataset": code, "resource_id": code,
+                        "resource_name": res.get("resource_name", code),
+                        "format": "jsonl",
+                        "url": spec["endpoint"],
+                        "last_modified": "",
+                        "size": None,
+                        "license": None,
+                        "portal": spec.get("portal"),
+                        "note": res.get("notes", ""),
+                        "_es_index": res["index"],
+                        "_es_api_key": spec.get("api_key", ""),
+                        "_es_query": res.get("query", {"match_all": {}}),
+                        "_es_page_size": spec.get("page_size", 1000),
+                    })
             elif ctype == "scrape":
                 inv.append({"jurisdiction": juris, "connector": "scrape",
                             "code": spec.get("code", f"{juris}_SCRAPE"),

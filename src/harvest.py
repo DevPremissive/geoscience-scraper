@@ -21,7 +21,7 @@ from urllib.request import Request, urlopen
 
 import config as C
 from discover import discover_all
-from connectors import arcgis
+from connectors import arcgis, wfs, es_scroll
 
 
 def init_manifest():
@@ -85,8 +85,9 @@ def main():
             continue
 
         fname = (r["resource_name"] or r["resource_id"] or "data").replace("/", "_")
-        if not Path(fname).suffix:
-            fname += f".{fmt or 'dat'}"
+        raw = Path(fname)
+        if fmt and not raw.suffix or (raw.suffix and "_" in raw.suffix):
+            fname += f".{fmt}"
         dest = C.RAW_DIR / r["jurisdiction"] / r["code"] / today / fname
 
         try:
@@ -95,6 +96,27 @@ def main():
                 sha = hashlib.sha256(dest.read_bytes()).hexdigest()
                 size = dest.stat().st_size
                 extra = f" ({cnt} features)"
+            elif r["connector"] == "wfs_layer":
+                cnt = wfs.fetch_paged(
+                    r["url"], r.get("type_name", ""),
+                    r.get("sort_by", "OBJECTID"), dest,
+                    page_size=r.get("page_size", 10000),
+                )
+                sha = hashlib.sha256(dest.read_bytes()).hexdigest()
+                size = dest.stat().st_size
+                extra = f" ({cnt} features)"
+            elif r["connector"] == "es_scroll":
+                result = es_scroll.fetch_scroll(
+                    endpoint=r["url"],
+                    index=r["_es_index"],
+                    api_key=r.get("_es_api_key", ""),
+                    dest=dest,
+                    page_size=r.get("_es_page_size", 1000),
+                    query=r.get("_es_query", {"match_all": {}}),
+                )
+                sha = hashlib.sha256(dest.read_bytes()).hexdigest()
+                size = dest.stat().st_size
+                extra = f" ({result['fetched']} records)"
             else:
                 sha, size = stream_download(r["url"], dest)
                 extra = ""

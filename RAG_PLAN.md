@@ -2,6 +2,11 @@
 
 ## Storage Location
 
+> **Superseded 2026-08-12.** The lake was split across two volumes — bulk data on the
+> external drive, indexes (including `chroma_db/`) on local NVMe. The paths below are
+> kept for historical context; see README "Storage layout" for the current layout, and
+> always resolve paths through `src/config.py`.
+
 Everything lives under `~/canada-geo-lake/` (configurable via `CANADA_GEO_LAKE` env var).
 
 ```

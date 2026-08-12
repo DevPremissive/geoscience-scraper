@@ -38,8 +38,9 @@ def main():
 
     if C.GPKG_PATH.exists():
         try:
-            layers = con.execute("SELECT DISTINCT layer_name FROM st_read_meta(?)",
-                                 [str(C.GPKG_PATH)]).fetchall()
+            row = con.execute("SELECT * FROM st_read_meta(?)",
+                              [str(C.GPKG_PATH)]).fetchone()
+            layers = [(l["name"],) for l in row[3]] if row else []
         except Exception:
             layers = []
         for (layer,) in layers:
@@ -50,9 +51,13 @@ def main():
             print(f"  spatial {t}")
 
     if C.MANIFEST_DB.exists():
-        con.execute("ATTACH ? AS m (TYPE sqlite)", [str(C.MANIFEST_DB)])
-        con.execute("CREATE TABLE resources AS SELECT * FROM m.harvest")
-        print("  table   resources (provenance)")
+        con.execute(f"ATTACH '{C.MANIFEST_DB}' AS m (TYPE sqlite)")
+        try:
+            con.execute("CREATE TABLE resources AS SELECT * FROM m.harvest")
+            print("  table   resources (provenance)")
+        except Exception:
+            print("  ! no harvest table in manifest DB", file=sys.stderr)
+        con.execute("DETACH m")
 
     # unified full-text view
     parts = []

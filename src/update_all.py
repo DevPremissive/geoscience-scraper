@@ -3,7 +3,7 @@
 import subprocess, sys
 from pathlib import Path
 HERE = Path(__file__).parent
-for step in (["harvest.py"], ["process.py"], ["build_index.py"]):
+for step in (["harvest.py"], ["process.py"], ["build_index.py"], ["coverage.py"]):
     cmd = [sys.executable, str(HERE / step[0])]
     print(f"\n>>> {' '.join(cmd)}")
     if subprocess.run(cmd).returncode != 0:

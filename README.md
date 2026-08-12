@@ -19,6 +19,7 @@ Adding a jurisdiction = adding a dict entry to `src/sources.py`. No new code.
 ## Quick start
 
 ```bash
+cd ~/projects/canada-geo-data-lake
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
@@ -50,17 +51,49 @@ See `COVERAGE.md` for the full matrix.
 
 ## Storage layout
 
+Three locations, deliberately. Code is version-controlled, bulk data is not, and the
+indexes sit on a filesystem that can be trusted with random writes.
+
+**Code** — `~/projects/canada-geo-data-lake/` (this repo)
+
+**Bulk** — `/media/vis/Expansion/canada-geo-lake/` (external drive, override with `CANADA_GEO_LAKE`)
+
 ```
-canada-geo-lake/
 ├── raw/<JURISDICTION>/<CODE>/<YYYY-MM-DD>/   # immutable dated snapshots
 ├── pdfs/<JURISDICTION>/<CODE>/<id>.pdf        # assessment-report PDFs (opt-in)
 ├── processed/
 │   ├── geo.gpkg                               # ALL vector layers, one file
 │   └── tables/*.parquet                       # flat attribute tables
+└── .canada-geo-lake                           # mount marker — do not delete
+```
+
+**Index** — `~/infra/canada-geo-lake-data/` (local NVMe, override with `CANADA_GEO_INDEX`)
+
+```
 ├── catalog.duckdb                             # national metadata search index
 ├── manifest.sqlite                            # harvest ledger
+├── chroma_db/                                 # PDF vector store
 └── logs/
 ```
+
+Why the split: the bulk volume is large, append-mostly and re-downloadable, so it can
+live on a slow external disk. The indexes are small, random-IO heavy and want a
+journalling filesystem — and they are rebuildable from the bulk data if lost.
+
+### Two constraints the external drive imposes
+
+The bulk volume is **exFAT**, which means:
+
+1. **No symlinks, hardlinks, or POSIX permissions** on that volume.
+2. **Illegal filename characters:** `" * : < > ? \ |`. Anything writing to `raw/` or
+   `pdfs/` must pass downloaded names through `config.safe_filename()` first.
+
+`config.require_lake()` refuses to run if the drive is not mounted. Without that check
+an unmounted drive is indistinguishable from an empty lake, and a harvest run would
+silently re-download the whole mirror onto the root filesystem.
+
+`~/canada-geo-lake/` still exists as a symlink shim so older absolute paths resolve;
+new code should use `src/config.py` instead.
 
 ## Scheduled updates
 

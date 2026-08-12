@@ -3,7 +3,7 @@
 All queries run against `catalog.duckdb`:
 
 ```bash
-duckdb ~/canada-geo-lake/catalog.duckdb
+duckdb ~/infra/canada-geo-lake-data/catalog.duckdb
 ```
 
 Layer/table naming:

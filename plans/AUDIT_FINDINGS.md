@@ -1,0 +1,385 @@
+# AUDIT FINDINGS — verification of the C0–C6 plans against actual system state
+
+**Audited:** 2026-08-13 · **Auditor:** Claude Code session · **Subject:** `MASTER_PLAN.md`, `PLAN_C0.md`–`PLAN_C6.md`
+
+The plans were authored without access to this machine. This document records what was verified, with the command and output for each claim, so a reader can re-derive rather than trust. Every finding below was challenged a second time before being recorded; findings that did not survive challenge are marked **DOWNGRADED** or **REFUTED** and kept, not deleted.
+
+Paths assume `src/` as CWD with `../.venv/bin/python`; `L=/media/vis/Expansion/canada-geo-lake`.
+
+---
+
+## 0. What the plans got right
+
+Worth stating first, because it calibrates trust in everything else. Every row count and line count checked was **exact**:
+
+| Claim | Source | Verified |
+|---|---|---|
+| ON claims 202,407 | C1.1 / MASTER §7 | 202,407 |
+| ON alienations 3,480 · dispositions 24,440 · non-mining 231,389 · plans/permits 4,571 | C1.1 | all exact |
+| BC MTA tenures 42,285 | C1.1 | 42,285 |
+| NU claims 34,411 · leases 893 · permits 2,600 | C1.1 | all exact |
+| NB claims 86 · MPS 27,555 · drillholes 17,887 | C1.1 / C2.4 | all exact |
+| MRDS 304,632 records | C2.1 | 304,632 (46 cols) |
+| BC RGS2020 65,008 samples, 193 columns | C2.3 | 65,008 / 193 |
+| QC SIGÉOM 13 packages | C0.2 | exactly 13 |
+| `serve.py` 327 lines · `pdf_extract.py` 95 | MASTER §6 / C5.1 | exact |
+| `sources.py` 592 · `es_scroll.py` 126 | MASTER §6 / C0.1 | 592 / 126 before this session's credential edits (+1 each) |
+| manifest 1,804 harvest records | C0.7 | 1,804 |
+| geo.gpkg 77 layers · 40 parquet tables | C0 / guide.py | 77 / 40 |
+
+The errors are concentrated in **interpretation of failures** and **assumptions about data that does not exist**.
+
+---
+
+## A. Blocking findings
+
+### A1 — There is no historical archive to back-fill from
+
+C0.7 states: *"Backfill from every snapshot pair already on disk (`manifest.sqlite` lists 1,804 harvest records — historical diffs are free signal nobody else has)."*
+
+```bash
+find "$L/raw" -mindepth 3 -maxdepth 3 -type d -printf '%f\n' | sort | uniq -c
+#     107 2026-06-12
+#      14 2026-06-13
+```
+
+Verified from **disk directories**, not only the ledger, so it is not a manifest artifact. Per-source:
+
+```
+ON_CLAIMS2      2 dates: ['2026-06-12','2026-06-13']
+ON_ALIENATIONS  2 dates: ['2026-06-12','2026-06-13']
+ON_DISPOSITIONS 1 date · ON_PLANS_PERMITS 1 · BC_MTA_CURRENT 1
+NU_MINERAL_CLAIMS 1 · YT_QUARTZ_CLAIMS 1 · YT_PLACER_CLAIMS 1 · NB_MINERAL_CLAIMS 1
+```
+
+**Consequence.** The lake holds two snapshot dates one day apart, 61 days stale. Backfill yields ~1 day of diffs on two Ontario layers. The following are unachievable as written:
+
+- **Gate G0** — "`tenure_events` populated for ≥2 jurisdictions with a spot-checked diff". Only one jurisdiction has any pair.
+- **C1.3 heat** — requires a trailing 8-quarter history per cell.
+- **C2.6 staking backtest** — requires year Y features → year Y+1 staking labels.
+- **C6.3 momentum** — "applied retroactively over backfilled events".
+- **Gate G3** — depends on C2.6.
+
+### A2 — Ontario carries no owner or dates; BC/YT carry attributes but only for surviving tenures
+
+```
+                    Ontario ON_CLAIMS2   BC_MTA_CURRENT              YT_QUARTZ_CLAIMS
+owner fields        (none)               OWNER_NAME, CLIENT_NUMBER_ID,   (none)
+                                         PERCENT_OWNERSHIP, NUMBER_OF_OWNERS
+date fields         (none)               ISSUE_DATE, GOOD_TO_DATE,   STAKING_DATE, RECORDED_DATE,
+                                         TERMINATION_DATE            EXPIRY_DATE
+```
+
+Ontario was checked **at the raw KMZ level**, in case `process.py` had dropped attributes:
+
+```
+large tile: -80.5_48.5_-80_49.kmz (217,780 bytes) → 5,387,861 bytes KML, 3,388 placemarks
+  ExtendedData: False | SchemaData: False | SimpleData fields: NONE
+  'owner' False · 'holder' False · 'client' False · 'recorded' False
+  'expiry' False · 'due date' False · 'anniversar' False · 'company' False
+```
+
+The processed layer exposes only `Claim Number`, `Cell Claim Type`, `Claim Status` (inside an HTML `description` blob). Ontario genuinely publishes nothing more through OGSEarth.
+
+**Blocked on Ontario as harvested:** C1.4 ownership graph, C1.5 criticality (needs owner blocks), C1.6 lapse watch (needs expiry), C6.2 buyer graph (seeded from C1.4 owners). **C1.6's premise "ON claims carry due dates" is false.**
+
+**DOWNGRADED — the survivorship qualification.** First pass treated BC/YT as giving usable attribute-derived history. Both are *current-registry* layers:
+
+```
+BC_MTA_CURRENT  rows=42,285   TERMINATION_DATE non-null: 23 / 42,285
+YT_QUARTZ_CLAIMS rows=168,481 TENURE_STATUS: Active 164,985 · Expired 2,603 · Pending 893
+```
+
+Dropped tenures are largely purged. Yukon's dates are `int64` epoch-**milliseconds** (`pd.to_datetime(..., unit="ms")`; naive string parsing collapses them to 1970) and do reach 1902:
+
+```
+staked per year: 2020:1886 2021:2755 2022:6027 2023:5782 2024:4889 2025:3150 2026:5305
+```
+
+But these count *claims staked in year X that survive today*. Older years are progressively under-counted and the 2022→2025 decline is partly artifact. **Descriptive signal, not unbiased history — not a sound basis for the C2.6 backtest.** This strengthens A1's conclusion: forward snapshot accumulation is the only route to unbiased history.
+
+### A3 — QC files are ZIP archives misnamed `.gpkg` / `.shp` / `.fgdb`
+
+C0.2 proposes `pyogrio.list_layers` over `.gpkg`/`.fgdb`/`.shp` trees.
+
+```bash
+find "$L/raw/QC" -type f ! -name '_source.json' -print0 | xargs -0 file -b | sed 's/,.*//' | sort | uniq -c
+#      38 Zip archive data
+#      11 CSV ISO-8859 text
+#       4 CSV ASCII text  ·  2 JSON  ·  2 CSV Non-ISO  ·  1 CSV Unicode
+```
+
+```
+pyogrio.list_layers('.../Sondages - Jeux de données géographiques.gpkg')
+→ DataSourceError: not recognized as being in a supported file format
+zipfile entries: 'SIGEOM_geopackage.qgz' (1,346,932) · 'sigeom.gpkg' (39,034,880)
+inner magic: b'SQLite format 3\x00'          ← genuine GPKG inside
+```
+
+GDAL dispatches on extension, so `/vsizip/` also fails on the misnamed archive — while working correctly on the 58 properly-named `.zip` files elsewhere in the lake (verified against `Mineral ClaimsClaims miniers.zip` → 1 layer).
+
+**REFINED remedy.** `process.py:32-49` (`expand()`) **already unzips**, but selects with `work.rglob("*.zip")` — an extension glob that misses these. Content sniffing in that one function resolves it; no mass rename needed. Root cause upstream is `harvest.py:87-90`, which names files from the CKAN `format` field rather than sniffing content.
+
+---
+
+## B. Wrong-diagnosis findings
+
+### B1 — ~1.3 GB of Ontario data was downloaded successfully, then lost
+
+C0.1 asserts the `direct` connector *"never fetched"* the bedrock zip and that `es_scroll.py` *"produced nothing"*. The ledger says otherwise — eight 2026-06-13 rows with correct sizes and sha256, no file on disk:
+
+| Code | Connector | Recorded bytes |
+|---|---|---|
+| ON_GEOL_SURFICIAL | direct | 503,462,794 |
+| ON_GEOPHYS | direct | 245,860,577 |
+| ON_OAFD | es_scroll | 227,852,810 |
+| ON_GEOCHEM | direct | 137,182,550 |
+| ON_GEOL_BEDROCK | direct | 133,479,067 |
+| ON_ODHD | direct | 39,238,386 |
+| ON_AMIS | es_scroll | 19,264,757 |
+| ON_OMI | direct | 6,304,937 |
+
+Snapshot directories exist holding only `_source.json`. Ledger-vs-disk by connector:
+
+```
+arcgis_hub 0/1 · arcgis_layer 0/13 · ckan 0/181 · direct 6/63
+es_scroll 2/2 · ogsearth 1016/1541 · wfs_layer 0/3      (missing/total)
+```
+
+So **`es_scroll` worked** (228 MB of OAFD JSONL, 19 MB AMIS) and **`direct` fetched the full 133 MB bedrock zip**. C0.1's stated causes are false; the repair work is still needed.
+
+**Mechanism.** `harvest.py:128-131`:
+
+```python
+if prev and prev[0] == sha and not args.force:
+    dest.unlink(missing_ok=True)      # deletes the file in the CURRENT snapshot dir
+    skipped += 1
+    continue                          # ...without touching the manifest row → orphan
+```
+
+On a same-day re-run `dest` equals the path the existing row references, so the row is orphaned.
+
+**STRENGTHENED — the competing explanation is refuted.** First pass allowed "someone manually deleted large files". Sizes at 2026-06-13:
+
+```
+survived: 568 rows — largest: 1,607.3MB BC_MTA_GRID · 610.1MB CGMC · 610.1MB CGMC
+missing :   8 rows — smallest: 6.3MB ON_OMI
+max surviving 1,607.3MB  ≫  min missing 6.3MB
+```
+
+A size-based cleanup would have taken the 1.6 GB file first. All eight losses are Ontario and only Ontario — consistent with `harvest.py --jurisdiction ON` re-run the same day. **Not proof:** one small `ON_AMIS` CKAN file from that date survived and is unexplained, and `logs/` is empty. Strong fit, not certainty. **The defect is real either way and must be fixed before any re-harvest.**
+
+### B2 — The ledger's `ogsearth` paths are systematically missing `.kmz`
+
+```
+ogsearth rows=1541  missing=1016  of which exist at local_path+'.kmz' = 1016
+genuinely absent after .kmz fix: 0
+```
+
+**No data is lost.** (This is the residue of the 1,024 flagged during the drive migration: 1,016 path mismatch + the 8 real losses in B1.)
+
+**REFRAMED — mechanism not settled.** First pass called this "a cosmetic manifest bug, one-line fix". There *is* a genuine defect at `harvest.py:89`:
+
+```python
+if fmt and not raw.suffix or (raw.suffix and "_" in raw.suffix):
+#  parses as (fmt and not raw.suffix) or (raw.suffix and "_" in raw.suffix)
+```
+
+Tile names are coordinates, so `Path.suffix` returns nonsense and the extension decision is made by accident:
+
+```
+'-95_53_-94.5_53.5'  → suffix '.5'        → no append   → ledger lacks .kmz
+'-93.5_53.5_-93_54'  → suffix '.5_-93_54' → appends .kmz → ledger STILL lacks .kmz  ← inconsistent
+```
+
+The second case contradicts a single-cause story, and `process.py:expand()` renames on a `shutil.copytree` **temp copy**, so it is not the mutator. **Treat as: fix the precedence bug, reconcile the ledger, do not assert a cause.**
+
+### B3 — C0.1 undercounts broken harvests
+
+`ON_GEOL_SURFICIAL` shows the identical failure to `ON_GEOL_BEDROCK` and is not listed:
+
+```
+ON_GEOL_SURFICIAL/2026-06-12/Surficial Geology of Southern Ontario.zip
+  49,932 bytes — HTML document (GeologyOntario Angular shell), not a ZIP
+ON_GEOL_BEDROCK/2026-06-12/1-250 000 Scale Bedrock Geology of Ontario.zip
+  49,932 bytes — HTML document
+```
+
+`ON_GEOPHYS` and `ON_AMIS` hold only KML previews (3–58 KB). Geophysics is **38** HTML files at 6,004 bytes plus one `_source.json` — not "39 files all exactly 6,004 bytes":
+
+```
+find "$L/raw/FED/GEOPHYSICS" -type f -printf '%s\n' | sort | uniq -c
+#      1 501       ← _source.json
+#     38 6004      ← HTML error pages ("Geophysical Data / Données géophysiques")
+```
+
+### B4 — CGMC exists in three byte-identical copies
+
+```
+sha256 45b24a59…  610,108,628 bytes ×3
+  2026-06-12/2024_CGMC_Lithology_EPSG3978.tif
+  2026-06-13/Canada Geological Map Compilation - Dataset download - English.geotif
+  2026-06-13/Canada Geological Map Compilation - Dataset download - French.geotif
+```
+
+**DOWNGRADED.** First pass proposed keeping one copy and reclaiming 1.22 GB. That would delete across snapshot dates, breaching the immutable-dated-snapshot contract in MASTER §4. Only the intra-snapshot 06-13 EN/FR pair is safely removable. **C0.3's stated remedy ("delete the FR copy") is correct as written and reclaims 610 MB.** Record the count; leave the remedy alone.
+
+---
+
+## C. Opportunity — a cheaper path the plans do not consider
+
+### C1 — Ontario's failed datasets are on public ArcGIS REST, reachable with the existing connector
+
+`https://ws.lioservices.lrc.gov.on.ca/arcgis1071a/rest/services/GeologyOntario/GeologyOntario_Map/MapServer`
+
+```
+id=46 OMEIS Mineral Inventory   id=47 OMEIS Drill Hole   id=50 OMEIS Technical File Area
+id=48 AMIS Site                 id=49 AMIS Feature       id=57 Bedrock Geology
+id=54 Faultlines                id=55 Iron Formation Lines  id=56 Dikes Lines
+id=52/53 Quaternary             id=58 Precambrian
+```
+
+**Compatibility verified, not assumed.** `connectors/arcgis.py:5` already documents *"page a FeatureServer/**MapServer** layer .../query with f=geojson"*, and a live request returns valid GeoJSON:
+
+```json
+{"type":"FeatureCollection","features":[{"type":"Feature","id":1,
+ "geometry":{"type":"Point","coordinates":[-90.0866…,51.4898…]},
+ "properties":{"HOLE_IDENT":105744,"TECH_ID":"52O09SE0024",
+ "HOLE_TYPE_CODE":"DD","HOLE_TYPE":"Diamond Drill Hole",…}}]}
+```
+
+Both layers report `maxRecordCount: 2000`, `supportsPagination: true` — matching `C.ARCGIS_PAGE = 2000`. **Adding these is a `sources.py` dict entry; no new code**, exactly as the plans' own doctrine requires.
+
+**Layer 47 `OMEIS Drill Hole` — 172,259 records.** Fields: `HOLE_IDENT, TECH_ID, HOLE_TYPE_CODE, HOLE_TYPE, COMPANY_HOLE_IDENT, COMPANY_NAME, PROPERTY_NAME, YEAR_DRILLED, LENGTH, LENGTH_UNIT, AZIMUTH, DIP, OVERBURDEN, ELEMENTS`.
+
+> **This is not ODHD.** `ON_ODHD` in the registry is the *Ontario Borehole Database* (`files.ontario.ca/opendata/ontario_borehole_database.zip`), which includes water wells and geotechnical holes. OMEIS is the exploration/assessment drillhole layer. For C2.4 it is the better source on two counts: `ELEMENTS` populates `commodities_tested[]` — which C2.4 assumed would be null — and `HOLE_TYPE` lets non-exploration holes be excluded before deriving barren negatives, a doctrine-level correctness issue the plans miss. Treat as **substitution plus enhancement**, not a repair of ODHD; both may be wanted.
+
+**Layer 50 `OMEIS Technical File Area` — 62,436 records** with spatial footprints. Fields: `TECH_ID, SUBMISSION_TYPE, PERFORMED_FOR, PROPERTY, PRIMARY_TOWNSHIP, RGP_DISTRICT, YEAR_FROM, YEAR_TO, COMMODITIES, FILE_IDENTIFIERS, VALUE_WORK, WORK_TYPE, WORK_TYPE_GROUP, INFO_LINK`. This is the assessment-file index C3.4 needs — with geometry, and requiring **no Elasticsearch scroll and no API key**.
+
+### C2 — MLAS ownership is not public via ArcGIS
+
+```
+GET /arcgis1071a/rest/services/MLAS?f=pjson → 403 Forbidden (Microsoft-Azure-Application-Gateway/v2)
+GET mlas.mndm.gov.on.ca/mlas/search/searchIndex.html → 200, AngularJS 1.x SPA (bower, jQuery 2.1.1)
+GET /mlas/views/js/app.config.js → 200, vendor boilerplate ("SmartAdmin"), no endpoint constants
+```
+
+Claim abstracts are at `#/search/searchClaimDetails?claimNumber=NNNNNN`. Ownership requires an XHR capture or per-claim retrieval → **C0.9 spike**.
+
+---
+
+## D. Sequencing and contract findings
+
+**D1 — Start the tenure archive clock in Phase 0.** MASTER §8 calls the point-in-time archive the defensible edge ("a competitor would need years of daily snapshots to reconstruct"), but no C3 work appears in Phase 1. Given A1 *and* A2's survivorship bias, forward accumulation is the only route to unbiased history. Move C3.1 into Phase 0.
+
+**D2 — C1.6 needs alerting that only Phase 4 mentions.** `grep -n "alerting\|C3\.6\|C3\.1" MASTER_PLAN.md` returns the §5 component table and one Phase-4 line ("alerting maturity"). C3.6 is never explicitly scheduled, yet C1.6 sits in Phase 1 and its acceptance requires two weeks of live alerts. Schedule C3.6 (≈1 day) alongside C1.6.
+
+**D3 — Long format is a poor fit for dense embeddings. DOWNGRADED.** MASTER §4 mandates long format and forbids stored wide pivots; C2.1 adds 1,024 dims/cell.
+
+```
+r7 cells over Canada landmass : 1,762,308   (plan's "~2 M" is sound)
+LONG rows for embeddings alone: 1,804,602,940
+  ≈7 GB compressed · WIDE float32 equivalent 7.2 GB
+```
+
+First pass called the pivot infeasible on 23 GB RAM. On challenge that overstates: the wide form fits, chunked pivots via DuckDB are workable, and the 23 GB figure is soft (the LLM holds ~30 GB and can be unloaded). Recommend a **narrow §4 exception** — dense embeddings as a wide float32 array artifact, long format retained for sparse scalar features — on ergonomic grounds, not impossibility.
+
+**D4 — The embedding server hard-fails on long documents.**
+
+```
+:8083 = mxbai-embed-large-v1.Q4_K_M · dim 1024 (measured)
+accepts ≤ ~2,687 chars (~671 tokens) · HTTP 500 beyond ~2,781   (model context = 512 tokens)
+throughput: 289 docs/s on short batches → ~1.7 h for 1.76 M cell documents
+```
+
+C2.1's `text_concat` cell documents will routinely exceed this. C2.1 lists chunking as a delegated nicety; it is a **hard requirement**. Check server config first — the limit may be partly raisable.
+
+**D5 — Smaller corrections.**
+
+| Item | Plan says | Actual |
+|---|---|---|
+| Antibot module | "the SEDAR+/SEDI module from `mining-scraper`" | `/home/vis/projects/sedi-scraper/antibot.py`, 1,836 lines (`ResponseLogger`, `ShieldTracker`, `TrustMetric`, `exponential_backoff`); mining-scraper imports it via `sys.path`. Real and reusable — reuse needs a path insert or packaging, unbudgeted |
+| ON AFRI count | "100k+" (C5, twice) | 62,357 (`sources.py`, `scrape.py`) / 62,436 (ArcGIS layer 50). Reconcile — possibly documents vs files |
+| `serve.py` tiles | "vector tiles … (existing pattern)" (C4.2) | `/layers /geojson/{layer} /search /coverage /stats /tenure` — GeoJSON only, **no tile endpoint**. Tiles are new work |
+| `eis-toolkit` | "preferred" (C2.7) | **Not on PyPI** (may install from source). `uncover-ml` 0.4.0 is available |
+| Raster/H3 stack | "add to requirements.txt" (C0.4) | All available for py3.12: h3 4.5.0 (**v4 API differs from v3**), rasterio 1.5.1, rioxarray 0.23.0, exactextract 0.3.0, h3ronpy 0.22.0, pystac-client 0.9.0. Also verified: pdfplumber, camelot-py, ocrmypdf, weasyprint, lark, pydantic, jinja2 |
+| `COVERAGE.md` | "overstates holdings" (C0.8) | Correct — marks ON_ODHD, ON_OAFD, ON_GEOL_BEDROCK/SURFICIAL, ON_GEOPHYS/GEOCHEM, CDoGS as READY when all are empty or failed |
+| Repo move | "move to `~/projects/canada-geo-lake`" (C0.8) | **Done 2026-08-12**; path is `~/projects/canada-geo-**data**-lake`; MEMORY.md entry exists; `RAG_PLAN.md` Ollama refs annotated |
+| `SK__SK_SMDI` | — | **140 rows** — implausibly low for the SK Mineral Deposit Index. Flagged, not diagnosed |
+| Chroma collection | "record the embedding dimension" (C0.8) | `geo_canada` is 768-dim (Ollama nomic) vs live 1024-dim — but holds **4 rows**. Footnote, not a migration: drop it, ensure new collections record dimension |
+
+**Environment confirmed as described:** chat `:8082` (`qwen3.6-35b`), embeddings `:8083` (mxbai, 1024), rag-proxy `:9100` — all HTTP 200. GPU RTX PRO 5000 Blackwell 48.9 GB (30 GB in use), 32 cores, 62 GB RAM, Python 3.12.3. Disk headroom ample: 22 TB free on the bulk volume, 2.8 TB on root.
+
+---
+
+## E. Data gap findings (second pass, 2026-08-13)
+
+The gap accounting in `HANDOFF_AI_EXPLORATION.md` §2/§5 was re-verified and promoted into
+`MASTER_PLAN.md` §6b so component plans need only one document. Four gaps it did not record,
+all surfaced by the Phase-1 switch to BC:
+
+### E1 — 46 misnamed containers, ~7.7 GB (gap #12)
+
+The `.gpkg`/`.shp`/`.fgdb` misnaming is **not QC-only**. Lake-wide scan of 2,317 raw files
+for extension-vs-content disagreement:
+
+```
+BC   1 file   0.03 GB  {'.shp': 1}     ← Bedrock Geology 2018 Shapefile.shp
+NB   6 files  0.01 GB  {'.shp': 6}
+NS   2 files  0.00 GB  {'.gdb': 1, '.shp': 1}
+QC  37 files  7.66 GB  {'.fgdb': 12, '.gpkg': 12, '.shp': 13}
+TOTAL 46 misnamed geo containers
+```
+
+`.xlsx` files also test as ZIP — that is normal OOXML and is excluded from the count above
+(7 BC spreadsheets were false positives in the first scan).
+
+**Phase-1 significance:** the single BC entry is its bedrock geology, which C2.1 (corpus
+text), C1.5 (trend from mapped structures) and C2.7 (geology categoricals) all need. One
+content-sniff fix in `process.py:expand()` unblocks all 46.
+
+### E2 — Only 1 of 5 BC raw datasets reached the spatial store (gap #14)
+
+```
+raw/BC/  BC_GEOCHEM 56M · BC_GEOL 27M · BC_MINFILE 55M · BC_MTA_CURRENT 69M · BC_MTA_GRID 1.5G
+geo.gpkg BC layers: ['BC__BC_MTA_CURRENT']        ← only one
+```
+
+Largely downstream of E1. BC geochem and MINFILE did reach Parquet (8 tables), so the loss is
+spatial geometry, not the attribute data.
+
+### E3 — British Columbia has no drillhole source registered (gap #13)
+
+```
+DRILLHOLE coverage by jurisdiction (gpkg layers + parquet tables):
+  BC     — none registered —          ← Phase-1 jurisdiction
+  ON     — none registered —          (172,259 available via OMEIS ArcGIS, see C1)
+  QC     QC_SIGEOM_DRILLHOLES  187,321
+  NB     NB_DRILLHOLE           17,887
+  NS/YT/SK/NT_NU — none —
+grep BC_ sources.py | grep -i 'drill|hole|aris'  →  only BC_ARIS_PDF (a scrape stub)
+```
+
+**This is a real cost of the BC switch and it was not visible before the switch was made.**
+C2.4 Tier-1 negatives and the C4 dossier Drilling section have no BC input. The handoff noted
+"BC (no drillhole source registered)" in passing under Drillholes; it did not carry through to
+any plan. Recorded now in MASTER §6b, PLAN_C0 §0.1/0.2 (discovery task), PLAN_C2 §2.4
+(coverage warning) and PLAN_C5 (possible reprioritisation of 5.2).
+
+### E4 — Corrections to the handoff's own gap table
+
+| Handoff said | Corrected |
+|---|---|
+| Gap #5 "mostly re-runs and one URL fix; `es_scroll` needs debugging — 1 day, cheapest win" | ~1.3 GB was fetched successfully then lost; `es_scroll` worked; Ontario is better served by public ArcGIS REST. See B1/C1 |
+| Gap #4 "ON AFRI 100k+" | 62,357 / 62,436 across three sources. See D5 |
+| Gap #1/#4 "mining-scraper's Camoufox session manager" | The anti-bot module is `sedi-scraper/antibot.py`. See D5 |
+| "All 39 files are exactly 6,004 bytes" | 38 files at 6,004 bytes + one 501-byte sidecar. See B3 |
+| "CGMC stored twice (EN + FR, 1.2 GB)" | Three copies, 1.83 GB — but only the intra-snapshot pair is safely removable. See B4 |
+| Modality table did not include a temporal-coverage row | Added as gap #10 — the tenure archive is spatially very strong and temporally absent |
+
+---
+
+## Change log
+
+- **2026-08-13** — initial audit; all findings above recorded after a second challenge pass. Six first-pass conclusions were corrected: B1 strengthened, B2 reframed, B4/D3/D5-Chroma downgraded, A2 qualified.
+- *(C0.9 MLAS spike memo to be appended here.)*

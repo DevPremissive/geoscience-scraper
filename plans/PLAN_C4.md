@@ -82,7 +82,13 @@ eyeball).
 Extend `serve.py` (FastAPI, 327 lines, already serving features/tiles) rather than a new
 service; reuse `mining-viz` hosting + auth at app.premissive.ca.
 
-- **Endpoints:** vector tiles / GeoJSON per `geo.gpkg` layer (existing pattern); fabric
+> **Scope correction 2026-08-13 (audit D5).** `serve.py` currently exposes `/layers`,
+> `/geojson/{layer}`, `/search`, `/coverage`, `/stats` and `/tenure` — **GeoJSON only, no
+> vector-tile endpoint**. Tiles are new work, not an existing pattern to extend, and the
+> 202,407-claim and 231,389-disposition layers will need them. Budget accordingly, or ship
+> v1 on GeoJSON with viewport bbox filtering and add MVT when frame rates demand it.
+
+- **Endpoints:** vector tiles / GeoJSON per `geo.gpkg` layer (GeoJSON exists; tiles are new); fabric
   choropleths (r7) for heat, prospectivity (per model version), and criticality (per
   watched block); `land_state` (r9) within a viewport; tenure-event pulses (recent
   events as a time-filtered layer); `/render?layers=&bbox=` returning a static PNG (used

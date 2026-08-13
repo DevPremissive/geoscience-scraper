@@ -1,14 +1,31 @@
 # PLAN C5 — Text & Reports: Due-Diligence RAG, Barren Confirmation, Corpus-Scale Features
 
-**Read `MASTER_PLAN.md` §2–§4 first.** The assessment-report corpus (150k+ reports
-enumerable nationally: ON AFRI 100k+, BC ARIS 33.5k, SK SMAD ~14.9k, NL GeoFiles 5k+,
+**Read `MASTER_PLAN.md` §2–§4 first.** The assessment-report corpus (~110k+ reports
+enumerable nationally: ON AFRI **62,357**, BC ARIS 33.5k, SK SMAD ~14.9k, NL GeoFiles 5k+,
 NS DCDH, NB PARIS, NTGS) is the richest exploration knowledge that exists for this
-ground and currently sits at zero bytes on disk. Three uses, built in this order —
+ground and currently sits at zero bytes on disk.
+
+> **Count corrected 2026-08-13 (audit D5).** This plan said "ON AFRI 100k+" twice. Three
+> independent sources agree on ~62k: `sources.py` and `connectors/scrape.py` both record
+> 62,357 assessment-report records, and LIO ArcGIS layer 50 (`OMEIS Technical File Area`)
+> returns 62,436. If the 100k figure came from a count of *documents* rather than *files*,
+> reconcile and state which unit is meant — the difference materially changes 5.3's harvest
+> volume and storage estimates.
+>
+> **Phase 1 is now BC (Master §7),** which also makes **BC ARIS the first corpus** rather
+> than a second — consistent with 5.3's existing "ARIS first" ordering. Three uses, built in this order —
 value-per-token descending, effort ascending:
 
 1. **Target-time due diligence** (per-deal RAG — small, immediate, Phase 2)
 2. **Barren confirmation** (Tier-2 negative upgrades + intercept positives — Phase 2)
 3. **Corpus-scale harvest + NER features** (heavy, deferrable — Phase 4)
+
+> **Possible reprioritisation (gap register #13).** BC — the Phase-1 jurisdiction — has **no
+> drillhole dataset registered**. If C0.1's discovery task confirms that BC drill data exists
+> only inside ARIS assessment reports, then 5.2 is not a Phase-2 nicety: it becomes the only
+> route to drill evidence for Phase-1 dossiers, and should move forward with a narrow scope
+> (intercepts and barren verdicts for holes on or adjacent to candidate ground, not the
+> corpus). Decide at Gate G0.
 
 **Depends on:** C3.4 (`fetch_reports`), C0.1 (OAFD index repair for ON ID resolution),
 local LLM stack (chat `:8082`, mxbai `:8083`, ChromaDB, rag-proxy `:9100`).
@@ -33,9 +50,13 @@ sections. Dozens of PDFs per deal, never a province.
   are invisible.
 - Chunking: page-anchored chunks (~1–2k chars, overlap) preserving `(report_id, page)` —
   the citation unit. Detect and specially tag table-dense pages (assay tables) for 5.2.
-- Embedding: mxbai `:8083`; ChromaDB **collection per target**
+- Embedding: mxbai `:8083` — verified `mxbai-embed-large-v1.Q4_K_M`, **dimension 1,024**,
+  and it returns **HTTP 500 above ~2,700 characters** (512-token context), so the page-anchored
+  chunks above must stay under that ceiling; ChromaDB **collection per target**
   (`dd_<target_id>`), metadata per chunk: report_id, page, year, work_types, juris.
   Collection metadata records embedding model + dimension (verified at runtime).
+  *Note: the pre-existing `geo_canada` collection is 768-dim (Ollama nomic) and holds 4 rows
+  — drop it rather than migrate it.*
 
 **Query layer (`dd_rag.py`):** a fixed question set, run per target, each answer with
 citations `(report_id, page)` — free-form chat exists but the dossier consumes the
@@ -90,7 +111,7 @@ correctly in a dossier.
 ## 5.3 Corpus-scale harvest + NER features (Phase 4)
 
 **Harvest order and rationale:** BC ARIS first (33.5k — richest per-report content),
-then ON AFRI (100k+ — best-documented stub, biggest volume). Remaining systems
+then ON AFRI (62,357 — best-documented stub, biggest volume). Remaining systems
 (SK SMAD, NL GeoFiles, NS DCDH/NovaScan, NB PARIS, NTGS) follow the per-system
 remediation strategies and effort estimates in `SCRAPERS_BLOCKED.md`, executed
 on-demand when deal flow touches the jurisdiction (per C3.4 policy) or when Phase-4

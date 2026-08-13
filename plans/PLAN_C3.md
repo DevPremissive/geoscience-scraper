@@ -14,7 +14,15 @@ health checks).
 
 ---
 
-## 3.1 Scheduling & operational hardening (~2 days)
+## 3.1 Scheduling & operational hardening (~2 days) — **MOVED TO PHASE 0**
+
+> **Resequenced 2026-08-13 (audit D1).** This was the last thing to be built; it is now
+> among the first. The lake holds **two snapshot dates one day apart**, and the tenure
+> registries publish current holdings only — so no amount of later work recovers history
+> that was not captured. C1.3 heat, C2.6 backtest and C6.3 momentum are all gated on an
+> archive that does not start until this timer runs. Every week of delay is a week of
+> unbiased history permanently lost. Build 3.1 and 3.6 in Phase 0; Gate G0 now requires
+> ≥7 consecutive days of unattended daily tenure snapshots.
 
 Cadence is decision-driven, never uniform:
 
@@ -46,9 +54,14 @@ deliberately broken source produces an alert within one cycle.
 The current on-disk "geophysics" is 39 HTML error pages (C0.1 deletes them). The Federal
 Geophysical Data Repository portal requires browser automation.
 
-- Reuse the proven Camoufox module from `mining-scraper` (ResponseLogger, ShieldTracker,
-  TrustMetric, exponential backoff, Mullvad rotation) — already validated against harder
-  anti-bot targets (SEDAR+/SEDI).
+- Reuse the proven Camoufox module — `/home/vis/projects/sedi-scraper/antibot.py` (1,836
+  lines: `ResponseLogger`, `ShieldTracker`, `TrustMetric`, `classify_block_type`,
+  `retry_strategy_for`, `exponential_backoff`, Mullvad rotation), already validated against
+  harder anti-bot targets (SEDAR+/SEDI). *Location corrected 2026-08-13: it lives in
+  `sedi-scraper`, not `mining-scraper` — the latter imports it via `sys.path`. Reuse from
+  this repo needs the same path insert or proper packaging; budget half a day.*
+  `mining-scraper/src/mining_scraper/browser/` separately offers `BrowserSessionManager` and
+  `detect_shield_square`.
 - Procedure: drive the portal UI headfully once with the ResponseLogger capturing the
   actual download request pattern (session token / POST handler); codify as a
   `geophysics_gdr` connector that replays with session persistence; polite pacing
@@ -98,8 +111,13 @@ fetch_reports(geometry, juris, max_reports=None) ->
 ```
 
 1. **Resolve IDs intersecting the geometry:**
-   - ON: OAFD assessment-file index (harvested once C0.1 fixes `es_scroll`) carries
-     spatial footprints/township references → AFRI report IDs.
+   - ON: **use LIO ArcGIS layer 50, `OMEIS Technical File Area` — 62,436 records with
+     spatial footprints**, fields `TECH_ID, SUBMISSION_TYPE, PERFORMED_FOR, PROPERTY,
+     PRIMARY_TOWNSHIP, YEAR_FROM, YEAR_TO, COMMODITIES, WORK_TYPE, FILE_IDENTIFIERS,
+     INFO_LINK`. *Corrected 2026-08-13 (audit C1): this replaces the OAFD Elasticsearch
+     route entirely. It is a plain paged ArcGIS query the existing `arcgis` connector already
+     handles, it carries geometry directly (no township-name resolution step), and it needs
+     **no API key**. The `es_scroll` dependency in this step is withdrawn.*
    - BC: ARIS index queryable spatially (ARIS layers/API alongside MINFILE) → ARIS numbers.
    - Later jurisdictions follow `SCRAPERS_BLOCKED.md` per-system strategies (SK SMAD
      viewstate two-phase POST; NL GeoFiles devtools-captured handler; NS NovaScan JSF;

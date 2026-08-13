@@ -5,6 +5,7 @@
 **Repo:** `~/projects/canada-geo-data-lake`
 **Bulk data:** `/media/vis/Expansion/canada-geo-lake` (external drive) · **Indexes:** `~/infra/canada-geo-lake-data`
 **Companion documents:** `PLAN_C0.md` … `PLAN_C6.md` (one component plan per subsystem, each self-contained; read this file first, then the component file being built).
+**Audit:** `AUDIT_FINDINGS.md` — these plans were written without access to the machine. Every factual claim was verified on 2026-08-13; corrections are folded in below and evidenced there. **Read it before executing any component.**
 
 ---
 
@@ -113,6 +114,13 @@ All components read and write through these stores. Component plans reference th
 model_version)`; every dossier value carries `(source_id, snapshot_date)`. Nothing is
 reported without provenance.
 
+**Dense-embedding exception (added 2026-08-13, audit D3):** the long-format rule holds for
+sparse scalar features. It does *not* apply to dense embeddings — 1,024 dims × ~1.76 M r7
+cells is ~1.8 billion long rows for one feature family. Store embeddings as a **wide
+float32 array artifact** (`features/<fabric_ver>/<snapshot>/embeddings.parquet`, ~7 GB) beside
+the long-format table, carrying the same `manifest.json` provenance. This is an ergonomics
+carve-out, not a licence to store wide pivots of anything else.
+
 ## 5. Component index
 
 | ID | Name | One-line scope | Plan file |
@@ -131,35 +139,115 @@ reported without provenance.
   `ckan / arcgis / wfs / ogsearth / es_scroll / direct / scrape(stub)`, `harvest.py`
   (URL re-resolution, sha256 change detection, dated snapshots), `process.py`,
   `build_index.py`, `serve.py` (FastAPI, 327 lines).
-- **Anti-bot browser automation:** Camoufox + the SEDAR+/SEDI module from `mining-scraper`
-  (ResponseLogger, ShieldTracker, TrustMetric, exponential backoff, Mullvad rotation) —
-  proven against harder targets than any geoscience portal.
-- **Local LLM stack:** llama.cpp chat at `:8082`, mxbai embeddings at `:8083` (verify
-  embedding dimension at runtime and record it in Chroma collection metadata), ChromaDB,
-  rag-proxy at `:9100`. `RAG_PLAN.md` still references retired Ollama endpoints — C0 fixes.
+- **Anti-bot browser automation:** Camoufox + `/home/vis/projects/sedi-scraper/antibot.py`
+  (1,836 lines: ResponseLogger, ShieldTracker, TrustMetric, exponential backoff, Mullvad
+  rotation) — proven against harder targets than any geoscience portal. *Note: this module
+  lives in `sedi-scraper`, not `mining-scraper`, which imports it via `sys.path`. Reuse from
+  this repo needs a path insert or packaging — budget for it.* `mining-scraper` separately
+  provides `src/mining_scraper/browser/` (`BrowserSessionManager`, `detect_shield_square`).
+- **Local LLM stack:** llama.cpp chat at `:8082` (`qwen3.6-35b`), mxbai embeddings at `:8083`
+  — **verified 1,024 dimensions**, `mxbai-embed-large-v1.Q4_K_M`, and it returns **HTTP 500
+  above ~2,700 characters** (512-token context), so chunking is mandatory, not optional.
+  ChromaDB, rag-proxy at `:9100`. `RAG_PLAN.md` Ollama references are annotated as superseded.
 - **Visualization:** `mining-viz` live at app.premissive.ca (auth + hosting reusable).
 - **Adjacent projects:** `pmx` (NI 43-101 → DCF; shares report feedstock with C5),
   `drill-database` (PostgreSQL, 320 holes; to be treated as downstream of the lake).
+
+## 6b. Data gap register (verified on disk 2026-08-13)
+
+The full accounting lives in `HANDOFF_AI_EXPLORATION.md` §2/§5; it is reproduced here —
+re-verified and re-ranked — because component plans must not have to read another document
+to know what data they do and do not have. **Status column is the authority; the handoff's
+effort estimates predate the audit and several were wrong.**
+
+### Modality inventory
+
+| Modality | State | Detail |
+|---|---|---|
+| **Geochemistry** | **STRONG** | QC SIGÉOM 561,232 stream/lake sediment (124 cols, full REE + PGE); BC RGS2020 65,008 (193 cols, multi-method); BC water 4,332; QC heavy minerals/erratics/geochron 3,606/1,562/2,735. Compositional — CLR/ILR required before any ML (C2.3) |
+| **Tenure** | **VERY STRONG (spatially), ABSENT (temporally)** | ~1.0 M polygons: ON 466,287 across 5 layers; YT 244,703 historical + 168,481 quartz + 33,934 placer; NU 34,411 + leases/permits; BC 42,285; NB, NS, NT. **But two snapshot dates and current-registry attributes only — see gap #10** |
+| **Deposit labels** | **GOOD, unharmonised** | MRDS 304,632 (rich free text); USMIN ~750k; BC MINFILE 15,142 + 1,696 products + 13,731 reserves; QC métalliques/mines/activités 9,291/79/1,078; QC MINPOT 5,622 pre-computed targets (benchmark comparator); NB 1,611; SK SMDI 140 (**suspect — see gap #15**) |
+| **Drillholes** | **MODERATE, and mis-distributed** | QC 187,321 with downhole `PROF/LITH/MINR` interval structure; NB 17,887; ON 172,259 available via OMEIS ArcGIS (gap #5). **BC — none registered (gap #13)**; NS 28,341 blocked |
+| **Geology** | **PARTIAL — mostly present but unreadable** | FED CGMC 610 MB national lithology raster + legend GPKG (untouched by `process.py`); QC bedrock 778,153 + 385,731 outcrop points and polygons; BC Bedrock Geology 2018; QC quaternary 120,184 + 18,175. **Most of it is trapped behind gap #12** |
+| **Geophysics** | **EMPTY** | Only QC EM-anomaly SHP. No gravity, magnetics, radiometrics, DEM |
+| **Remote sensing** | **ZERO** | No Sentinel-2, Landsat, ASTER, hyperspectral, DEM of any kind |
+| **Text** | **ZERO bytes** | `pdfs/` empty; Chroma effectively empty (4 rows). Enumerable but unharvested: ON AFRI 62,357, BC ARIS 33,500+, SK SMAD ~14,889, NL GeoFiles 5,000+, NS DCDH, NTGS, NB PARIS |
+
+### Ranked gaps
+
+| # | Gap | Impact | Owner | Status (2026-08-13) |
+|---|---|---|---|---|
+| 10 | **No historical tenure archive** — 2 snapshot dates 1 day apart; registries publish current holdings only, so attribute-derived history omits dropped ground | Blocks heat, staking backtest, momentum — the business signal itself | **C3.1** (Phase 0) | **NEW, highest priority.** Unfixable retroactively; only accrues forward. Why C3.1 moved to Phase 0 |
+| 1 | **National geophysics grids** (mag 200 m/1 km, grav 2 km, radiometrics 250 m) | Blocks the most-used MPM evidence layers | C3.2 | Open. GDR portal needs browser automation; tooling exists at `sedi-scraper/antibot.py` |
+| 12 | **46 misnamed containers, ~7.7 GB** — `.shp`/`.gpkg`/`.fgdb`/`.gdb` files that are actually ZIPs (QC 37, NB 6, NS 2, BC 1) | Most of the geology modality is on disk but unreadable; **includes BC Bedrock Geology 2018, which Phase 1 needs** | **C0.2** | **NEW.** One content-sniff fix in `process.py:expand()` unblocks all 46 |
+| 2 | **Remote sensing + DEM: nothing** | Blocks EO-derived evidence and alteration indices | C3.3 | Open. STAC APIs — open, no auth, no scraping |
+| 3 | **No raster pipeline or grid fabric** | Without it there is no feature matrix, so no MPM at all | C0.4/C0.5 | Open. All packages verified installable for py3.12 |
+| 4 | **Text corpus at zero** | Blocks due-diligence RAG, Tier-2 negatives, NER features | C5 / C3.4 | Open. **BC ARIS first** — now aligns with BC Phase 1 |
+| 11 | **Ontario ownership + expiry absent** — OGSEarth carries only claim number, cell type, status | Blocks ownership graph, criticality, lapse watch, buyer graph for ON | **C0.9** | **NEW.** Drove the Phase-1 switch to BC. MLAS spike, time-boxed 1 day |
+| 5 | **Broken/never-run harvests** | CGMC, ON bedrock/surficial/ODHD/OMI/geochem/geophys, OAFD, AMIS, FED CDoGS + tenure + deposits | C0.1 | **Re-diagnosed.** Not "1 day of re-runs": ~1.3 GB was fetched then lost to a `harvest.py` defect, and the Ontario items are better served by public ArcGIS REST than the original paths |
+| 13 | **BC has no drillhole source registered** | Phase-1 dossier "Drilling" section (C4 §6) will be empty for BC targets; C2.4 negatives must come from QC/NB/ON | C0.1 discovery + C5.2 | **NEW.** See Phase-1 note below |
+| 14 | **4 of 5 BC raw datasets never reached `geo.gpkg`** — only `BC_MTA_CURRENT` did | BC bedrock, MINFILE spatial, MTA grid absent from the spatial store in the Phase-1 jurisdiction | C0.2 | **NEW.** Largely a consequence of #12 |
+| 6 | **No label harmonisation** | MPM positives unusable across jurisdictions | C2.8 | Open |
+| 8 | **No spatial CV / PU protocol** | Results silently inflated | C2.5 | Open. Must exist before the first model |
+| 7 | **No modelling layer** | A lake with nothing attached | C2.7 | Open. `eis-toolkit` is **not on PyPI**; `uncover-ml` 0.4.0 is |
+| 15 | **`SK__SK_SMDI` holds 140 rows** | Implausibly low for the SK Mineral Deposit Index | C0.1 | **NEW.** Flagged, undiagnosed |
+| 9 | **No 3D/voxel or uncertainty story** | The most open frontier | deferred | Deferred until the above land; QC drillholes + `mining-viz` are the substrate |
+
+### What this means for Phase 1 (BC)
+
+BC was chosen because it is the only jurisdiction whose *tenure* data supports the full
+C1→C6 chain. Its **evidence** coverage is thinner than Ontario's, and Phase 1 must account
+for that honestly:
+
+- **Strong:** RGS2020 geochem (65,008 × 193), MINFILE 15,142 deposits, MTA tenure with owners
+  and dates, ARIS report corpus (33.5k, richest per report).
+- **Blocked-but-close:** BC Bedrock Geology 2018 is on disk and unblocks with the #12 fix.
+- **Genuinely missing:** BC drillholes (#13). Gate G1 dossiers will carry an explicit
+  "NOT AVAILABLE — no BC drillhole source registered" in the Drilling section rather than a
+  silent omission (C4.1 already mandates this). Closing #13 — whether a BCGS bulk drillhole
+  dataset exists, or whether BC drill data only lives inside ARIS reports — is a discovery
+  task for C0.1 and a direct input to whether C5.2 intercept extraction gets pulled earlier.
 
 ## 7. Roadmap
 
 Phases are gated; a phase does not start until the prior gate passes human review.
 
-**Phase 0 — Foundation (≈1.5–2 weeks).** All of C0.
-*Gate G0:* the five broken harvests verified on disk with correct byte counts; QC vector
-layers queryable in `geo.gpkg`; r7 fabric built and a demonstration feature matrix
-generated; `tenure_events` populated for ≥2 jurisdictions with a spot-checked diff.
+**Phase 0 — Foundation (≈2–2.5 weeks).** All of C0, **plus C3.1 (daily tenure scheduler) and
+C3.6 (alerting) pulled forward from C3.**
 
-**Phase 1 — Ontario vertical slice (≈4 weeks).** Ontario first: daily OGSEarth tenure,
-202,407 claims, 126k drillholes post-repair, enumerable AFRI index, online map staking.
-Build: C1.1–C1.6 for ON; C2.1 (text→prospectivity, national corpus, validated on published
-Canadian Zn-Pb results) + C2.2 (ScienceBase benchmark layers) + C2.4 Tier-1 negatives from
-ODHD + C2.5 validation module; C4.1 dossier generator v1 + C4.2 minimal map; C6.2 manual
-buyer identification for 2–3 live Ontario stories; C6.1 comps collection begins.
+C3.1 moves here because the archive clock is the one thing that cannot be caught up later.
+The lake holds **two snapshot dates one day apart** (audit A1), and the BC/YT attribute
+dates that partially substitute describe only *surviving* tenures (audit A2), so every week
+without daily snapshots is a week of unbiased history permanently lost. C3.6 moves here
+because C1.6's acceptance depends on it.
+
+*Gate G0:* repaired harvests verified on disk by `verify_harvest.py`; QC vector layers
+queryable in `geo.gpkg`; r7 fabric built and a demonstration feature matrix generated;
+**daily tenure snapshots running unattended for ≥7 consecutive days with heartbeats**; the
+`tenure_events` diff engine demonstrated on those consecutive days for ≥2 jurisdictions
+(replaces the old "backfill ≥2 jurisdictions" criterion, which the data cannot satisfy);
+MLAS go/no-go recorded (C0.9).
+
+**Phase 1 — British Columbia vertical slice (≈4 weeks).** *Switched from Ontario 2026-08-13.*
+BC is the only jurisdiction whose harvested tenure data supports the full C1→C6 chain:
+`OWNER_NAME` + `CLIENT_NUMBER_ID` + `PERCENT_OWNERSHIP` (ownership graph, buyer seeding),
+`ISSUE_DATE`/`GOOD_TO_DATE`/`TERMINATION_DATE` (lapse watch), 42,285 MTA tenures, MINFILE
+deposits, RGS2020 geochem (65,008 samples × 193 columns) and the ARIS report corpus — all in
+one jurisdiction. Ontario carries **no owner and no dates** in OGSEarth (audit A2), which
+blocks C1.4/C1.5/C1.6/C6.2 there until C0.9 resolves MLAS.
+
+Build: C1.1–C1.6 for BC; C2.1 (text→prospectivity, national corpus, validated on published
+Canadian Zn-Pb results) + C2.2 (ScienceBase benchmark layers) + C2.4 Tier-1 negatives +
+C2.5 validation module; C4.1 dossier generator v1 + C4.2 minimal map; C6.2 buyer
+identification for 2–3 live BC stories; C6.1 comps collection begins.
 *Gate G1 (thesis test):* **5–10 human-reviewed dossiers for real open ground adjacent to
 real active stories, each with a named probable buyer and a defensible price range.** If
 the best-covered jurisdiction cannot produce credible candidate deals, the fix is in deal
 selection (C1/C6), not in more modelling — decide before horizontal investment.
+
+*Ontario is not abandoned:* it retains online map staking, 62,357 AFRI assessment reports
+and the OMEIS drillhole layer, and remains the priority for C3.4/C5 report work and for
+open-ground/dossier output. Only the ownership- and history-dependent components move.
 
 **Phase 2 — Economics + on-demand text (≈3 weeks).** C6.1–C6.5 built properly; C3.4
 on-demand report fetch for ON AFRI + BC ARIS; C5.1 due-diligence RAG; C5.2 barren
@@ -169,9 +257,13 @@ comps-anchored valuation, and buyer capacity — i.e., a dossier you would actua
 
 **Phase 3 — Modality closure + expansion (≈4 weeks).** C3.2 national geophysics grids;
 C3.3 STAC remote sensing + DEM; C2.7 full-stack MPM baselines with SHAP; C1 extended to
-BC, SK, YT, NU; QC GESTIM bulk-licensing decision executed (see Risks).
-*Gate G3:* a 4-modality prospectivity model with spatially-blocked CV scores and a
-year-N→N+1 staking backtest, run with and without tenure-derived features.
+ON (subject to C0.9), SK, YT, NU; QC GESTIM bulk-licensing decision executed (see Risks).
+*Gate G3:* a 4-modality prospectivity model with spatially-blocked CV scores, run with and
+without tenure-derived features. **The year-N→N+1 staking backtest is deferred to whenever
+the snapshot archive spans two comparable periods** — it cannot be run at Phase 3 on data
+that starts accumulating in Phase 0 (audit A1/A2). Until then C2.6 ships only the
+survivorship-caveated descriptive series; the backtest is a gate on its own timeline, not
+on Phase 3.
 
 **Phase 4 — Scale (ongoing).** C5.3 corpus-scale ARIS/AFRI harvest + NER cell features;
 C4.4 LLM theory front-end; C6.4 fitted valuation model as comps accumulate; alerting
@@ -187,6 +279,18 @@ maturity; remaining jurisdictions.
   Mitigations are encoded, not hoped for: criticality scoring (C1.5) prefers cells a buyer
   eventually needs; the deal score (C6.6) carries a `buyer_count > 1` bonus and a buyer
   drill-program-timing term.
+- **The point-in-time archive does not exist yet — and cannot be bought or backfilled.**
+  (Audit A1/A2.) Two snapshot dates, one day apart, 61 days stale as of 2026-08-13.
+  Tenure registries publish *current* holdings only: BC has `TERMINATION_DATE` on 23 of
+  42,285 rows, and Yukon retains 2,603 expired against 164,985 active claims, so
+  attribute-derived history systematically omits dropped ground — precisely the signal the
+  business depends on. The moat is real but its clock starts the day C3.1 runs, which is
+  why C3.1 is now Phase 0. Treat any pre-archive staking series as descriptive and label it
+  survivorship-biased wherever it appears.
+- **Ontario publishes no ownership or expiry.** (Audit A2.) OGSEarth exposes only claim
+  number, cell type and status — verified at the raw KMZ level. C1.4/C1.5/C1.6/C6.2 cannot
+  run on Ontario until C0.9 determines whether MLAS abstracts are retrievable at scale.
+  The LIO ArcGIS `MLAS` folder returns 403; the public SPA is the only visible route.
 - **Heat is public.** Staking velocity is observable by anyone with the same idea; ON/BC
   professional stakers already watch lapses. The defensible edge is the joined signal
   (heat × criticality × geology × barren-veto × buyer capacity) plus the point-in-time

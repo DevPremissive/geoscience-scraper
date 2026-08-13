@@ -49,8 +49,44 @@ Ontario-only — consistent with `harvest.py --jurisdiction ON`. Fix: skip *with
 when the destination is inside the snapshot the ledger already references, or write to a
 `.part` file and only promote on success.
 
-**Second — re-point Ontario at public ArcGIS REST instead of the Azure-blob/Elasticsearch
-paths.** This is cheaper, keyless and uses code that already exists (`arcgis.py:5` documents
+**Second — register the MLAS operational bulk shapefiles as Ontario's authoritative tenure
+source (audit F).** This is the single highest-value item in C0 and it is a registry entry,
+not an engineering task.
+
+```
+https://www.geologyontario.mndm.gov.on.ca/mines/documents/claimaps/mlas_operational_gis_data.zip
+208 MB · ESRI shapefiles · no auth, no key, no scraping · regenerated daily
+```
+
+The project currently harvests the OGSEarth KMZ superoverlay, which the province labels
+"an unofficial version to be used for viewing purposes only". It carries no attributes and
+**undercounts claims by half**.
+
+| Layer | Features | Fields that matter |
+|---|---|---|
+| `Operational_Cell_Claims` | **401,594** (vs 202,407 harvested) | `HOLDER`, `ISSUE_DATE`, `ANNIVERSAR`, `CLAIM_DUE_`, `TENURE_STA` — all 100% populated, 1,403 distinct holders |
+| `Cancelled_Claim_Polygons` | **431,557** | `HOLDER`, `ISSUE_DATE`, `TERMINATIO`, `STATUS`, `TENURE_HIS` — an unbiased staked-and-dropped record from 2018-04 |
+| `Mining_Land_Tenure` | 22,940 | `HOLDER`, `EXPIRY_DAT`, `TAX_RENT_E` |
+| `Operational_Alienations` | 16,812 | `ALIENATION`, `ALIEN_DESC`, `JUSTIFICAT` |
+| `Non_Mining_Land_Tenure` | 193,757 | `DISPOSITIO`, `EFFECTIVE_` |
+| `Plans_Permits` | 799 | `TENURE_HOL`, `HOLDER`, `PROJECT_NA` |
+
+Processing notes that are not optional:
+- **Parse the `(NN)` percentage prefix out of `HOLDER`** (`"(100) KENORLAND EXPLORATION LTD"`)
+  into `owner_name` + `percent`; multi-holder claims appear as several prefixed entries. This
+  feeds C1.4 directly and largely solves its entity-resolution problem.
+- **Split `STATUS` on `Cancelled_Claim_Polygons` before treating anything as a drop**:
+  303,138 `Cancelled` are genuine abandonment; 102,966 `Amalgamated`, 2,379 `Merged` and
+  20,038 `Active` are not, and would register as false drops in C1.3 heat and C2.6 labels.
+- **Read the bundled `_Terms of Use.htm`** ("MNDM Electronic Information Products") before
+  any dossier carrying this data leaves the machine — C4.1's sales render depends on it.
+- The companion `endm_administrative_gis_data.zip` holds the cell grid and **pre-2018 legacy
+  claims**; the cancelled-claims history begins 2018-04-06 when Ontario converted to map
+  staking. Harvest it too if history before that date is wanted.
+- Keep the OGSEarth KMZ registered as a fallback only.
+
+**Third — re-point Ontario geoscience at public ArcGIS REST instead of the
+Azure-blob/Elasticsearch paths.** This is cheaper, keyless and uses code that already exists (`arcgis.py:5` documents
 FeatureServer/**MapServer** paging with `f=geojson`; live request verified; both layers
 report `maxRecordCount` 2000 with `supportsPagination: true`, matching `C.ARCGIS_PAGE`).
 Adding them is a `sources.py` dict entry — **no new code**.
@@ -137,7 +173,7 @@ layers — and no BC bedrock, no BC MINFILE spatial, no MTA grid.
 
 **Also in 0.1/0.2 scope — a discovery task, not a fix (gap #13):** determine whether a bulk
 **BC drillhole** dataset exists (BCGS / MTO / MINFILE-linked), or whether BC drill data only
-exists inside ARIS assessment reports. BC is the Phase-1 jurisdiction and currently has
+exists inside ARIS assessment reports. BC is the second jurisdiction and currently has
 **no drillhole source registered at all**, which leaves C2.4 negatives and the C4 dossier
 Drilling section empty for BC targets. The answer determines whether C5.2 intercept
 extraction must be pulled forward into Phase 1. Time-box to half a day; record the outcome
@@ -239,8 +275,17 @@ lapse watch), so it is built here, hardened, not as a C1 afterthought.
 > both; every other tenure source has one. "Historical diffs are free signal nobody else
 > has" is false: the available diff is one day, two Ontario layers.
 
-- **Do not plan a backfill.** Build the diff engine against the one available consecutive
-  pair to prove correctness, then let C3.1 (now Phase 0) accumulate real history forward.
+> **Partly reversed the same day (audit F2).** Ontario *does* have history — not as snapshot
+> diffs, but as a retained cancellation register. `Cancelled_Claim_Polygons` (431,557 rows)
+> carries `ISSUE_DATE` and `TERMINATIO` from 2018-04-06, so staked-and-dropped events are
+> directly reconstructible and **not survivorship-biased**. Build `tenure_events` for Ontario
+> from that file rather than from diffs, and emit the same event schema so downstream
+> consumers cannot tell the difference. Split `STATUS` first — only the 303,138 `Cancelled`
+> are drops. Everything below still applies to every other jurisdiction.
+
+- **Do not plan a snapshot backfill.** Build the diff engine against the one available
+  consecutive pair to prove correctness, then let C3.1 (still Phase 0) accumulate real
+  history forward for the jurisdictions that lack Ontario's cancellation register.
 - **Partial substitute, with a caveat that must travel with it.** BC and YT publish dates as
   attributes: BC `ISSUE_DATE`/`GOOD_TO_DATE`/`TERMINATION_DATE`, YT `STAKING_DATE`/
   `RECORDED_DATE`/`EXPIRY_DATE` (int64 epoch-**milliseconds** — parse with `unit="ms"`;
@@ -250,12 +295,13 @@ lapse watch), so it is built here, hardened, not as a C1 afterthought.
   so dropped ground is invisible and older years are progressively under-counted. Emit any
   such series with an explicit `survivorship_biased = true` column. It is descriptive
   context, never a training label or a backtest ground truth.
-- **Acceptance:** the diff engine reproduces hand-checked changes across the 06-12→06-13 pair
-  for `ON_CLAIMS2` and `ON_ALIENATIONS` (20 randomly sampled events verified against the raw
-  snapshots); full-file re-issues are handled by hash comparison before diffing; and once
-  C3.1 has run ≥7 days, events populate for ≥2 jurisdictions from genuinely consecutive
-  daily snapshots. The old "backfill ≥2 jurisdictions" criterion is withdrawn as
-  unsatisfiable.
+- **Acceptance:** `tenure_events` for Ontario built from the cancellation register, covering
+  2018-04 onward, with `STATUS` correctly split and 20 sampled events verified against the
+  MLAS attribute table; the diff engine separately reproduces hand-checked changes across the
+  06-12→06-13 pair for `ON_CLAIMS2` and `ON_ALIENATIONS`; full-file re-issues handled by hash
+  comparison before diffing; and once C3.1 has run ≥7 days, diff-derived events populate for
+  ≥2 jurisdictions from genuinely consecutive daily snapshots. The old "backfill ≥2
+  jurisdictions from snapshot pairs" criterion is withdrawn as unsatisfiable.
 
 ## 0.8 Housekeeping (~0.5 day)
 
@@ -271,36 +317,30 @@ lapse watch), so it is built here, hardened, not as a C1 afterthought.
   is 768-dim (Ollama nomic) and holds 4 rows — drop it rather than migrate; ensure every new
   collection records its embedding model and dimension in collection metadata.
 
-## 0.9 MLAS ownership spike (~1 day, time-boxed) — *added 2026-08-13*
+## 0.9 ~~MLAS ownership spike~~ — **WITHDRAWN 2026-08-13, same day it was added**
 
-Ontario publishes **no owner and no expiry** through OGSEarth — verified at the raw KMZ
-level (a 217 KB tile with 3,388 placemarks has no `ExtendedData`, no `SchemaData`, and no
-owner/holder/expiry text anywhere). Only `Claim Number`, `Cell Claim Type`, `Claim Status`.
-This blocks C1.4, C1.5, C1.6 and C6.2 for Ontario. The information is expected to be public
-— it is served through the MLAS claim-abstract system — but not through any open endpoint
-found so far: the LIO ArcGIS `MLAS` folder returns **403 Forbidden**, and
-`mlas.mndm.gov.on.ca` is an AngularJS 1.x SPA whose `app.config.js` is vendor boilerplate
-with no endpoint constants.
+The spike existed because Ontario appeared to publish no owner or expiry. It does — through
+the MLAS operational bulk shapefiles, not through OGSEarth. The KMZ finding was correct about
+the KMZ and wrong about Ontario. See 0.1 "Second", and audit F.
 
-**The deliverable is a decision, not a scraper.** Open a claim abstract
-(`#/search/searchClaimDetails?claimNumber=NNNNNN`) with devtools, capture the XHR the app
-issues, and determine: is ownership retrievable in bulk, or only per-claim? Record endpoint,
-auth requirement, rate limits, an effort estimate for a full connector, and a go/no-go, as a
-memo appended to `AUDIT_FINDINGS.md`. Try plain HTTP first; fall back to
-`sedi-scraper/antibot.py` only if blocked. Politeness per `C.REQUEST_GAP`.
+No scraping is required: `HOLDER`, `ISSUE_DATE`, `ANNIVERSAR` and `CLAIM_DUE_` are 100%
+populated across 401,594 claims in a keyless daily ZIP. The routes investigated and rejected
+(LIO ArcGIS `MLAS` → 403; the AngularJS claim-abstract SPA; `data.ontario.ca` "Mining Claims
+Information Database" → access-restricted since 2016) are recorded in audit F4 so nobody
+re-runs the search.
 
-**Stop at one day regardless of outcome.** Ontario ownership is no longer on the Phase-1
-critical path — Phase 1 is BC.
+*Remaining small task, folded into 0.1:* read the bundled `_Terms of Use.htm` and record
+whether the licence permits redistribution inside a dossier that leaves the machine.
 
 ## Gate G0 checklist
 
 - [ ] 0.1 repairs verified by `verify_harvest.py`; `harvest.py` unlink defect fixed; ledger reconciled to zero orphans
-- [ ] 0.2 QC layers spatially queryable (container sniffing in `process.py:expand()`)
+- [ ] 0.1 **MLAS operational bundle registered**; ON claims 401,594 (not 202,407) with `HOLDER` parsed; Terms of Use recorded
+- [ ] 0.2 QC **and BC** layers spatially queryable (container sniffing in `process.py:expand()`)
 - [ ] 0.4 raster ingest + zonal working on CGMC
-- [ ] 0.5 fabric + demonstration **BC** feature matrix, deterministic
-- [ ] 0.7 diff engine verified on the 06-12→06-13 pair; **C3.1 running ≥7 days**; events for ≥2 jurisdictions from consecutive daily snapshots
+- [ ] 0.5 fabric + demonstration **Ontario** feature matrix, deterministic
+- [ ] 0.7 Ontario `tenure_events` built from the cancellation register (2018-04 onward, `STATUS` split); diff engine verified on the 06-12→06-13 pair; **C3.1 running ≥7 days** for the jurisdictions without a cancellation register
 - [ ] 0.8 docs truthful (`COVERAGE.md` rewritten)
-- [ ] 0.9 MLAS go/no-go recorded
 - [ ] C3.1 + C3.6 operational (pulled into Phase 0 — see Master §7)
 
 ## Handoff notes for detailed planning

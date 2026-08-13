@@ -69,11 +69,14 @@ news_cadence, profile_as_of
 1. Seed list: owners from the C1.4 ownership graph within 5 km of any watched or
    screened target → resolve to SEDAR+ issuer profiles (this join also closes C1.4's
    numbered-company gaps — write the resolved ids back to `owners`).
-   *Jurisdiction note 2026-08-13 (audit A2): the seed graph is **British Columbia** in
-   Phase 1 — BC's tenure layer carries `OWNER_NAME` and a registry `CLIENT_NUMBER_ID`, the
-   latter collapsing much of the numbered-company problem before SEDAR+ is consulted.
-   Ontario contributes no owners at all until C0.9 resolves MLAS, so no ON buyer profiles
-   can be built in Phase 1.*
+   *Jurisdiction note (audit F1): the seed graph is **Ontario** in Phase 1. MLAS `HOLDER` is
+   100% populated across 401,594 claims with only 1,403 distinct holders province-wide, so
+   the seed set is small, clean, and dominated by named issuers — `(100) KENORLAND
+   EXPLORATION LTD` alone holds 54,020 cells, `Juno Corp.` 28,164, `Wyloo Ring of Fire Ltd.`
+   13,796, `AGNICO EAGLE MINES LIMITED` 8,912. Those are directly resolvable to SEDAR+
+   issuers, which makes C6.2's Phase-1 target of 2–3 complete profiles comfortable rather
+   than tight. `Cancelled_Claim_Polygons.HOLDER` additionally supports `acquisition_history`
+   and `consolidator_flag` from 2018 onward instead of from today.*
 2. Write the tracking list to `market/issuers.parquet` (C3.5 consumes it to scope
    pulls); tracked set grows with the watchlist, never the whole exchange.
 3. Extraction from filings: treasury from most recent financials; financings from
@@ -85,7 +88,7 @@ news_cadence, profile_as_of
    adjacent block is the single strongest urgency signal — a buyer drilling toward your
    cells has a deadline; a dormant one can wait you out).
 
-**Acceptance:** complete profiles for the 2–3 Phase-1 British Columbia stories; treasury
+**Acceptance:** complete profiles for the 2–3 Phase-1 Ontario stories; treasury
 figures match the filings they cite; capacity/propensity/timing render in a dossier with
 their sources.
 
@@ -101,14 +104,16 @@ below its prior local peak — interest building before the rush crests. This fl
 prioritizes the screening queue (C4.3) and lapse-watch attention (C1.6); it never
 bypasses review.
 
-**Acceptance (revised 2026-08-13, audit A1/A2).** The retroactive test is withdrawn for
-Phase 1 — it depends on the backfilled event history that C0.7 assumed and that does not
-exist, and the attribute-derived substitute omits dropped ground entirely. Instead:
-(a) the momentum surface for **British Columbia** renders in the viewer over whatever window
-exists; (b) the entry-window flag is unit-tested against synthetic heat/financing series
-with known crossings; (c) the market overlays (financings, drill programs, price regime)
-are live and sourced. **The retroactive rush test becomes a deferred check**, run alongside
-C1.3's, once ≥4 quarters of C3.1 daily snapshots have accrued.
+**Acceptance (restored for Ontario, audit F2).** The retroactive test was withdrawn when it
+appeared no unbiased event history existed; Ontario's cancellation register supplies ~33
+quarters from 2018-04, so it is back on: the entry-window flag, applied retroactively over
+Ontario events, must flag at least one belt *before* its news-verifiable staking rush (the
+same rush used in C1.3 acceptance). Also required: (a) the momentum surface renders in the
+viewer; (b) market overlays (financings, drill programs, price regime) are live and sourced;
+(c) `Amalgamated`/`Merged` excluded from staking-velocity counts. For jurisdictions without
+a cancellation register the weaker test applies — unit tests against synthetic
+heat/financing series — with the retroactive check deferred until ≥4 quarters of C3.1
+snapshots accrue.
 
 ## 6.4 Claim valuation (~3 days v1; fitted model deferred until data justifies)
 

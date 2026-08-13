@@ -8,27 +8,30 @@ adjacent, and which open cells does a specific neighbour eventually need."
 C3.6 (alerting, for 1.6).
 **Feeds:** C6 (every deal-score term except geology), C4 (map layers, dossier sections),
 C2 (heat as a covariate, staking backtest labels).
-**Estimated effort:** ~2 weeks for **British Columbia** (Phase 1), ~1 week per additional
+**Estimated effort:** ~2 weeks for **Ontario** (Phase 1), ~1 week per additional
 jurisdiction thereafter (mostly rules-table verification and subtraction-layer sourcing).
 
-> **Jurisdiction switched to BC, 2026-08-13 (audit A2).** The original plan built C1 on
-> Ontario. Ontario's harvested tenure layer carries **no owner and no dates** — only
-> `Claim Number`, `Cell Claim Type`, `Claim Status`, verified at the raw KMZ level — which
-> makes 1.4, 1.5 and 1.6 unbuildable there. BC carries `OWNER_NAME`, `CLIENT_NUMBER_ID`,
-> `PERCENT_OWNERSHIP`, `NUMBER_OF_OWNERS`, `OWNERSHIP_TRANSFER_EVENT_COUNT`, plus
-> `ISSUE_DATE`/`GOOD_TO_DATE`/`TERMINATION_DATE`. Ontario returns to scope when C0.9
-> resolves whether MLAS abstracts are retrievable at scale.
+> **Jurisdiction: Ontario.** Briefly switched to BC on 2026-08-13 and reverted the same day
+> (audit F). The switch rested on the finding that Ontario carries no owner or dates — true
+> of the OGSEarth KMZ, false of Ontario. The **MLAS operational bulk shapefiles** (C0.1)
+> carry `HOLDER`, `ISSUE_DATE`, `ANNIVERSAR` and `CLAIM_DUE_` on all **401,594** cell claims,
+> 100% populated, 1,403 distinct holders — plus **431,557 cancelled claims with termination
+> dates back to 2018-04**, which is an unbiased staked-and-dropped history.
 >
-> **Standing caveat for 1.3 and everything downstream:** BC's layer is a *current registry* —
-> `TERMINATION_DATE` is non-null on 23 of 42,285 rows. Dropped tenure is invisible in
-> attributes. Real activity history begins with C3.1's daily snapshots, not with the data on
-> disk today.
+> **This section therefore depends on C0.1 registering the MLAS bundle.** Until it does,
+> every ON computation here runs on the wrong product and half the claims (202,407 of
+> 401,594).
+>
+> **Standing caveat for other jurisdictions:** BC and YT publish *current registries* — BC has
+> `TERMINATION_DATE` on 23 of 42,285 rows — so dropped tenure is invisible there and their
+> activity history begins with C3.1's daily snapshots. Ontario is the exception, not the rule.
+
 **New package:** `src/land/` — `open_ground.py`, `rules.py`, `heat.py`,
 `ownership_graph.py`, `criticality.py`, `lapse_watch.py`.
 
 ---
 
-## 1.1 Open-ground computation (~2 days for BC)
+## 1.1 Open-ground computation (~2 days for ON)
 
 Open ground = jurisdiction landmass minus the union of every encumbrance layer, computed
 on r9 cells within AOIs and as dissolved polygons for map display.
@@ -37,8 +40,8 @@ Per-jurisdiction subtraction stack (initial; extend via `sources.py`, never hard
 
 | Juris | Subtraction layers (all already harvested unless noted) |
 |---|---|
-| **BC (Phase 1)** | MTA tenures (42,285), parks/protected areas (**new source: BC Data Catalogue**), mineral/placer reserve sites (no-registration reserves — **new source**) |
-| ON | active claims (OGSEarth), alienations (3,480), dispositions (24,440) + non-mining dispositions (231,389), plans & permits (4,571), provincial parks & conservation reserves (**new source: Ontario GeoHub/LIO — add registry entry**). *Open-ground computation works for ON; only the owner-dependent components (1.4–1.6) are blocked pending C0.9* |
+| **ON (Phase 1)** | active cell claims (**MLAS `Operational_Cell_Claims`, 401,594** — not the 202,407 OGSEarth KMZ), alienations (**MLAS `Operational_Alienations`, 16,812**), mining land tenure (22,940), non-mining land tenure (193,757), plans & permits (799), provincial parks & conservation reserves (**new source: Ontario GeoHub/LIO — add registry entry**) |
+| BC | MTA tenures (42,285), parks/protected areas (**new source: BC Data Catalogue**), mineral/placer reserve sites (no-registration reserves — **new source**) |
 | YT | quartz + placer claims, leases, groupings, crown grants (all harvested); note physical-staking regime in rules |
 | NU | claims (34,411), leases (893), prospecting permits (2,600); surface-rights/IOL parcels (**new source: CIRNAC/NPC**) |
 | SK | mineral disposition layers from SK ER FeatureServer |
@@ -52,10 +55,10 @@ Implementation notes:
   type exists in the jurisdiction but its layer is not yet harvested; dossiers must show it.
 - Refresh incrementally: only cells intersecting geometries that appear in `tenure_events`
   since the last run, plus a weekly full rebuild as a consistency check.
-- **Acceptance:** for British Columbia, pick 15 cells spanning all states and verify each
-  against MTO's own public tenure viewer by hand; unknown-state cells < 5% of the AOI.
+- **Acceptance:** for Ontario, pick 15 cells spanning all states and verify each
+  against the MLAS Map Viewer by hand; unknown-state cells < 5% of the AOI.
 
-## 1.2 Jurisdiction rules table (~2 days BC+ON, then ~0.5 day each)
+## 1.2 Jurisdiction rules table (~2 days ON+BC, then ~0.5 day each)
 
 Rules are **data, human-verified, never scraped-and-trusted**. File per jurisdiction:
 `rules/<juris>.yaml`.
@@ -91,21 +94,27 @@ verification time** — the component plan deliberately ships the schema empty o
 `rules.py` exposes `holding_schedule(juris, n_claims, years) -> cost table` and
 `stakeable_now(juris) -> bool + missing prerequisites`, consumed by C6.5 and C4 dossiers.
 
-**Acceptance:** BC, ON, SK, YT, NU files verified and dated; a unit test computes a
-5-year holding schedule for a 10-cell BC claim block and a human confirms it against the
+**Acceptance:** ON, BC, SK, YT, NU files verified and dated; a unit test computes a
+5-year holding schedule for a 10-claim ON block and a human confirms it against the
 ministry fee page.
 
-## 1.3 Heat detection (~2 days build; signal accrues over time)
+## 1.3 Heat detection (~2 days)
 
-> **Timing correction 2026-08-13 (audit A1/A2).** Heat needs a trailing 8-quarter history.
-> None exists — the lake holds two snapshot dates one day apart. **Build the module in
-> Phase 1, but expect it to produce meaningful output only as C3.1's daily snapshots
-> accumulate.** Do not fabricate history from attributes: BC's `ISSUE_DATE` describes only
-> claims still held (`TERMINATION_DATE` non-null on 23 of 42,285), so an attribute-derived
-> series systematically omits the dropped ground that heat is meant to detect. Where such a
-> series is shown at all, carry `survivorship_biased = true` and label it in the UI.
-> The 8-quarter window degrades gracefully: compute over whatever whole quarters exist and
-> record `quarters_available` on every row.
+> **Runnable on Ontario today (audit F2).** Heat needs a trailing 8-quarter history, and the
+> first-pass audit concluded none existed anywhere. That holds for BC/YT/NU, but **not for
+> Ontario**: `Cancelled_Claim_Polygons` retains 431,557 records with `ISSUE_DATE` and
+> `TERMINATIO` from 2018-04, giving ~33 quarters of staked-and-dropped events with no
+> survivorship bias. Ontario heat is a real computation from day one.
+>
+> Two rules when using it:
+> - **Split `STATUS` first.** Only the 303,138 `Cancelled` are drops; `Amalgamated` (102,966)
+>   and `Merged` (2,379) are administrative and would read as false abandonment, inflating
+>   `expiry_count` and corrupting `restake_latency_days`.
+> - **Everywhere else, the original caveat stands.** BC's `ISSUE_DATE` describes only claims
+>   still held (`TERMINATION_DATE` non-null on 23 of 42,285), so any non-Ontario
+>   attribute-derived series omits dropped ground — carry `survivorship_biased = true` and
+>   label it in the UI. The 8-quarter window degrades gracefully elsewhere: compute over
+>   whatever whole quarters exist and record `quarters_available` on every row.
 
 Input: `tenure_events` (C0.7). Output: `processed/heat.parquet` — one row per
 (r7 cell, quarter).
@@ -134,17 +143,35 @@ exists are human-reviewed and free of diff artifacts; (c) `quarters_available` a
 — re-run it against BC once ≥4 quarters of daily snapshots have accrued, and treat a
 reproduced rush as the real validation of C1.3.
 
+**Acceptance (restored for Ontario, audit F2).** The paragraph above still governs
+jurisdictions without a cancellation register. For **Ontario the original test is back on**:
+the heat series must reproduce at least one staking rush independently verifiable from
+industry news. The 2018–2026 register makes this testable immediately — the 2025 spike
+(73,400 terminations against 51,390 in 2024) is the obvious starting point. Top-20 hot cells
+human-reviewed and free of artifacts, with `Amalgamated`/`Merged` correctly excluded from
+drop counts.
+
 ## 1.4 Ownership & adjacency graph (~3 days)
 
 Output: `processed/ownership.duckdb` with three tables:
 
-> **Source correction 2026-08-13 (audit A2).** Build this on **BC**, where the tenure layer
-> carries `OWNER_NAME`, `CLIENT_NUMBER_ID`, `PERCENT_OWNERSHIP`, `NUMBER_OF_OWNERS` and
-> `OWNERSHIP_TRANSFER_EVENT_COUNT` — the last of which is a useful consolidation signal the
-> original plan did not anticipate. **Ontario has no owner field at all** and cannot support
-> this component until C0.9 reports on MLAS. `CLIENT_NUMBER_ID` is a registry-assigned
-> identifier and should be preferred over name matching wherever present — it collapses much
-> of the entity-resolution problem below, including numbered companies.
+> **Source (audit F1).** Build this on **Ontario**, from the MLAS `HOLDER` field — 100%
+> populated across 401,594 claims, 1,403 distinct holders. Two things make it easier than the
+> plan assumes:
+> - `HOLDER` embeds ownership share as a `(NN)` prefix (`"(100) KENORLAND EXPLORATION LTD"`).
+>   Parse into `owner_name` + `percent`; multi-holder claims appear as several prefixed
+>   entries. That yields `PERCENT_OWNERSHIP` semantics for free.
+> - The holder set is small and clean — 1,403 distinct strings across the province — so the
+>   entity-resolution review queue below should be far under the 200-row target. Numbered
+>   companies remain the residual problem for C6.2.
+>
+> `Cancelled_Claim_Polygons.HOLDER` (326,212 populated) additionally gives **historical**
+> ownership, so `blocks.first_seen`/`last_change` and owner turnover are computable back to
+> 2018 rather than starting today.
+>
+> For **BC**, the equivalent fields are `OWNER_NAME`, `CLIENT_NUMBER_ID`,
+> `PERCENT_OWNERSHIP`, `NUMBER_OF_OWNERS` and `OWNERSHIP_TRANSFER_EVENT_COUNT` — prefer the
+> registry-assigned `CLIENT_NUMBER_ID` over name matching there.
 
 - `owners(owner_id, name_raw, name_normalized, entity_type_guess, sedar_issuer_id
   (nullable — joined by C6.2), aliases[])`. Entity resolution v1: uppercase, strip
@@ -162,9 +189,9 @@ Standard queries to ship as views: "open cells adjacent to blocks whose owner ha
 `staked` or `conversion` event in the last 2 quarters"; "blocks whose owner holds ground
 in ≥2 jurisdictions" (serious operators).
 
-**Acceptance:** for three known British Columbia juniors, the graph reproduces their property
+**Acceptance:** for three known Ontario juniors, the graph reproduces their property
 outline recognizably vs. their corporate presentations; entity-resolution review queue
-< 200 rows for BC.
+< 200 rows for ON.
 
 ## 1.5 Criticality scoring (~3 days)
 
@@ -189,22 +216,23 @@ Three sub-scores, max-combined with reason codes (interpretability over elegance
    contiguous open neighbors) represents in the direction of the trend — a cell covering
    the only on-trend expansion direction scores ~1.
 
-**Acceptance:** run against two real British Columbia stories; a human agrees the top-5
+**Acceptance:** run against two real Ontario stories; a human agrees the top-5
 critical cells per story are the ones a landman would want; every score explains itself via
 reason codes with no opaque blending.
 
 ## 1.6 Lapse watch (~1.5 days) — *requires C3.6, now scheduled in Phase 0*
 
-> **Premise corrected 2026-08-13 (audit A2/D2).** The original text asserts "ON claims carry
-> due dates". **They do not** — the Ontario layer has no date field of any kind. Expiry
-> attributes are available in BC (`GOOD_TO_DATE`), YT (`EXPIRY_DATE`, int64 epoch-ms) and
-> NU (`ANNIV_DT`). Ontario lapse watch depends entirely on C0.9. Separately, this section
+> **Premise restored (audit F1).** The original text asserts "ON claims carry due dates".
+> The first-pass audit called that wrong; it was wrong about the KMZ, not about Ontario.
+> MLAS `Operational_Cell_Claims` carries **`CLAIM_DUE_` and `ANNIVERSAR` on all 401,594
+> claims**, so Ontario lapse watch is directly buildable — it is in fact the best-served
+> jurisdiction, since it also has `HOLDER` for the alert payload. Separately, this section
 > depends on C3.6 alerting, which the original roadmap mentioned only as "alerting maturity"
 > in Phase 4 while placing C1.6 in Phase 1 — C3.6 is now Phase 0.
 
-- Sources: expiry/anniversary attributes where the tenure layer publishes them (BC
-  `GOOD_TO_DATE`, YT `EXPIRY_DATE`, NU `ANNIV_DT`) plus observed `expired` events for
-  jurisdictions without published dates (Ontario, pending C0.9).
+- Sources: expiry/anniversary attributes where the tenure layer publishes them (ON
+  `CLAIM_DUE_` + `ANNIVERSAR`, BC `GOOD_TO_DATE`, YT `EXPIRY_DATE` int64 epoch-ms, NU
+  `ANNIV_DT`) plus observed `expired` events for jurisdictions without published dates.
 - Watch rules (config, not code): alert when a claim with expiry ≤ N days (default 30)
   intersects (a) a top-decile heat cell, (b) any cell with criticality ≥ 0.5 for a watched
   block, or (c) a saved C4 screen's result set. Alert payload: claim id, expiry date,
@@ -215,7 +243,7 @@ reason codes with no opaque blending.
   flagging ground as stakeable.
 - Delivery via C3.6 alerting (ntfy/email).
 
-**Acceptance:** two weeks of live operation on British Columbia produces alerts whose
+**Acceptance:** two weeks of live operation on Ontario produces alerts whose
 claimed-expiry dates match the provincial registry, with zero "stakeable" flags on ground
 still in grace period.
 
@@ -225,12 +253,17 @@ QC (GESTIM boundaries non-public — MRNF bulk-licensing decision is a Master-pl
 action), MB (MapGallery only), NL (GeoFiles map only), AB (AER, no public claims API).
 `land_state` for these jurisdictions returns `unknown` everywhere rather than pretending.
 
-**Ontario ownership and expiry (added 2026-08-13).** ON is not a blind spot for *land* — its
-open-ground computation (1.1) works, and its geology, drillhole and assessment layers are
-strong. It is a blind spot for *who owns what and when it lapses*: OGSEarth publishes only
-claim number, cell type and status. The LIO ArcGIS `MLAS` folder returns 403; the public
-MLAS SPA is the only visible route. Until C0.9 reports, `owners`, `criticality` and
-`lapse_watch` return `unknown` for Ontario rather than guessing.
+**~~Ontario ownership and expiry~~ — not a blind spot (resolved 2026-08-13, audit F1).**
+Briefly recorded as one when only the OGSEarth KMZ had been examined. The MLAS operational
+bundle publishes `HOLDER`, `ISSUE_DATE`, `ANNIVERSAR` and `CLAIM_DUE_` openly and daily, so
+Ontario is the *best*-served jurisdiction for this component, not the worst. The dead ends —
+LIO ArcGIS `MLAS` 403, the claim-abstract SPA, the access-restricted `data.ontario.ca`
+record — are catalogued in audit F4 so the search is not repeated.
+
+**The real blind spot to watch is temporal coverage elsewhere.** Ontario's cancellation
+register starts 2018-04 (map-staking conversion); pre-2018 legacy claims sit in the separate
+administrative bundle. BC, YT and NU have no equivalent register at all, so their
+`tenure_events` genuinely begin with C3.1's first snapshot.
 
 ## Handoff notes for detailed planning
 

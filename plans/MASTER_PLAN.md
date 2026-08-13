@@ -177,36 +177,45 @@ effort estimates predate the audit and several were wrong.**
 
 | # | Gap | Impact | Owner | Status (2026-08-13) |
 |---|---|---|---|---|
-| 10 | **No historical tenure archive** — 2 snapshot dates 1 day apart; registries publish current holdings only, so attribute-derived history omits dropped ground | Blocks heat, staking backtest, momentum — the business signal itself | **C3.1** (Phase 0) | **NEW, highest priority.** Unfixable retroactively; only accrues forward. Why C3.1 moved to Phase 0 |
+| 10 | **No historical tenure archive — outside Ontario.** 2 snapshot dates 1 day apart. BC/YT/NU publish current holdings only, so their attribute history omits dropped ground | Blocks heat, staking backtest, momentum for every jurisdiction except ON | **C3.1** (Phase 0) | **Partially closed (audit F2).** Ontario retains 431,557 cancelled claims with issue + termination dates back to 2018-04 — an unbiased 8-year record. Everywhere else still accrues forward only, so C3.1 stays in Phase 0 |
 | 1 | **National geophysics grids** (mag 200 m/1 km, grav 2 km, radiometrics 250 m) | Blocks the most-used MPM evidence layers | C3.2 | Open. GDR portal needs browser automation; tooling exists at `sedi-scraper/antibot.py` |
 | 12 | **46 misnamed containers, ~7.7 GB** — `.shp`/`.gpkg`/`.fgdb`/`.gdb` files that are actually ZIPs (QC 37, NB 6, NS 2, BC 1) | Most of the geology modality is on disk but unreadable; **includes BC Bedrock Geology 2018, which Phase 1 needs** | **C0.2** | **NEW.** One content-sniff fix in `process.py:expand()` unblocks all 46 |
 | 2 | **Remote sensing + DEM: nothing** | Blocks EO-derived evidence and alteration indices | C3.3 | Open. STAC APIs — open, no auth, no scraping |
 | 3 | **No raster pipeline or grid fabric** | Without it there is no feature matrix, so no MPM at all | C0.4/C0.5 | Open. All packages verified installable for py3.12 |
 | 4 | **Text corpus at zero** | Blocks due-diligence RAG, Tier-2 negatives, NER features | C5 / C3.4 | Open. **BC ARIS first** — now aligns with BC Phase 1 |
-| 11 | **Ontario ownership + expiry absent** — OGSEarth carries only claim number, cell type, status | Blocks ownership graph, criticality, lapse watch, buyer graph for ON | **C0.9** | **NEW.** Drove the Phase-1 switch to BC. MLAS spike, time-boxed 1 day |
+| 11 | ~~**Ontario ownership + expiry absent**~~ | — | C0.1 | **CLOSED same day (audit F1).** The gap was in the *product harvested*, not in Ontario. `mlas_operational_gis_data.zip` carries `HOLDER` + `ISSUE_DATE` + `ANNIVERSAR` + `CLAIM_DUE_` on all 401,594 claims, 100% populated, no auth. Register it in `sources.py`; C0.9's MLAS scrape is withdrawn |
+| 16 | **The Ontario tenure harvest is the wrong product and undercounts by ~50%** — 202,407 KMZ claims vs 401,594 actual, with no attributes | Every ON land, ownership and activity computation runs on half the province | **C0.1** | **NEW (audit F3).** The province labels the harvested KMZ "unofficial… for viewing purposes only" |
 | 5 | **Broken/never-run harvests** | CGMC, ON bedrock/surficial/ODHD/OMI/geochem/geophys, OAFD, AMIS, FED CDoGS + tenure + deposits | C0.1 | **Re-diagnosed.** Not "1 day of re-runs": ~1.3 GB was fetched then lost to a `harvest.py` defect, and the Ontario items are better served by public ArcGIS REST than the original paths |
 | 13 | **BC has no drillhole source registered** | Phase-1 dossier "Drilling" section (C4 §6) will be empty for BC targets; C2.4 negatives must come from QC/NB/ON | C0.1 discovery + C5.2 | **NEW.** See Phase-1 note below |
-| 14 | **4 of 5 BC raw datasets never reached `geo.gpkg`** — only `BC_MTA_CURRENT` did | BC bedrock, MINFILE spatial, MTA grid absent from the spatial store in the Phase-1 jurisdiction | C0.2 | **NEW.** Largely a consequence of #12 |
+| 14 | **4 of 5 BC raw datasets never reached `geo.gpkg`** — only `BC_MTA_CURRENT` did | BC bedrock, MINFILE spatial and MTA grid absent from the spatial store; BC bedrock is needed by C2.1 corpus text | C0.2 | **NEW.** Largely a consequence of #12 |
 | 6 | **No label harmonisation** | MPM positives unusable across jurisdictions | C2.8 | Open |
 | 8 | **No spatial CV / PU protocol** | Results silently inflated | C2.5 | Open. Must exist before the first model |
 | 7 | **No modelling layer** | A lake with nothing attached | C2.7 | Open. `eis-toolkit` is **not on PyPI**; `uncover-ml` 0.4.0 is |
 | 15 | **`SK__SK_SMDI` holds 140 rows** | Implausibly low for the SK Mineral Deposit Index | C0.1 | **NEW.** Flagged, undiagnosed |
 | 9 | **No 3D/voxel or uncertainty story** | The most open frontier | deferred | Deferred until the above land; QC drillholes + `mining-viz` are the substrate |
 
-### What this means for Phase 1 (BC)
+### What this means for Phase 1 (Ontario)
 
-BC was chosen because it is the only jurisdiction whose *tenure* data supports the full
-C1→C6 chain. Its **evidence** coverage is thinner than Ontario's, and Phase 1 must account
-for that honestly:
+Once #11 and #16 are closed by registering the MLAS bundle, Ontario is complete across every
+component Phase 1 exercises:
 
-- **Strong:** RGS2020 geochem (65,008 × 193), MINFILE 15,142 deposits, MTA tenure with owners
-  and dates, ARIS report corpus (33.5k, richest per report).
-- **Blocked-but-close:** BC Bedrock Geology 2018 is on disk and unblocks with the #12 fix.
-- **Genuinely missing:** BC drillholes (#13). Gate G1 dossiers will carry an explicit
-  "NOT AVAILABLE — no BC drillhole source registered" in the Drilling section rather than a
-  silent omission (C4.1 already mandates this). Closing #13 — whether a BCGS bulk drillhole
-  dataset exists, or whether BC drill data only lives inside ARIS reports — is a discovery
-  task for C0.1 and a direct input to whether C5.2 intercept extraction gets pulled earlier.
+- **Tenure & ownership:** 401,594 cell claims with `HOLDER` and three date fields; 16,812
+  alienations; 22,940 mining land tenures with `EXPIRY_DAT`; 799 plans & permits.
+- **Activity history:** 431,557 cancelled claims, 2018-04 onward, unbiased — but split
+  `STATUS` first (303,138 `Cancelled` are real drops; 102,966 `Amalgamated` and 2,379
+  `Merged` are not).
+- **Drilling:** 172,259 OMEIS holes with `HOLE_TYPE` and `ELEMENTS` (#5 via ArcGIS).
+- **Reports:** 62,436 assessment-file footprints with geometry, keyless (#4/C3.4).
+- **Geology:** MRD126 bedrock via the same ArcGIS service.
+
+Residual Ontario weakness is *geochemistry* — its lake-sediment survey never harvested (#5)
+— where BC's RGS2020 (65,008 × 193) and QC's SIGÉOM (561,232 × 124) are far stronger. Since
+C2 is national, the geochemical anomaly layer (C2.3) should be built on QC/BC data even while
+C1/C4/C6 run on Ontario. That is a feature of the split, not a conflict.
+
+Two Phase-1 dependencies remain open regardless of jurisdiction: the raster/fabric pipeline
+(#3) and the container-sniffing fix (#12), which unblocks QC and BC bedrock geology for the
+C2.1 corpus.
 
 ## 7. Roadmap
 
@@ -226,28 +235,34 @@ queryable in `geo.gpkg`; r7 fabric built and a demonstration feature matrix gene
 **daily tenure snapshots running unattended for ≥7 consecutive days with heartbeats**; the
 `tenure_events` diff engine demonstrated on those consecutive days for ≥2 jurisdictions
 (replaces the old "backfill ≥2 jurisdictions" criterion, which the data cannot satisfy);
-MLAS go/no-go recorded (C0.9).
+the MLAS operational bundle registered and Ontario claims at 401,594 with `HOLDER` parsed (C0.1).
 
-**Phase 1 — British Columbia vertical slice (≈4 weeks).** *Switched from Ontario 2026-08-13.*
-BC is the only jurisdiction whose harvested tenure data supports the full C1→C6 chain:
-`OWNER_NAME` + `CLIENT_NUMBER_ID` + `PERCENT_OWNERSHIP` (ownership graph, buyer seeding),
-`ISSUE_DATE`/`GOOD_TO_DATE`/`TERMINATION_DATE` (lapse watch), 42,285 MTA tenures, MINFILE
-deposits, RGS2020 geochem (65,008 samples × 193 columns) and the ARIS report corpus — all in
-one jurisdiction. Ontario carries **no owner and no dates** in OGSEarth (audit A2), which
-blocks C1.4/C1.5/C1.6/C6.2 there until C0.9 resolves MLAS.
+**Phase 1 — Ontario vertical slice (≈4 weeks).** *Briefly switched to BC on 2026-08-13 and
+reverted the same day — see audit F.* The switch rested on a finding that Ontario carries no
+owner or dates. That was true of the OGSEarth KMZ the project had been harvesting, and false
+of Ontario: the **MLAS operational bulk shapefiles** publish `HOLDER`, `ISSUE_DATE`,
+`ANNIVERSAR` and `CLAIM_DUE_` on all **401,594** cell claims (100% populated, 1,403 distinct
+holders), plus **431,557 cancelled-claim records with termination dates** — an eight-year
+staked-and-dropped history with no survivorship bias.
 
-Build: C1.1–C1.6 for BC; C2.1 (text→prospectivity, national corpus, validated on published
-Canadian Zn-Pb results) + C2.2 (ScienceBase benchmark layers) + C2.4 Tier-1 negatives +
-C2.5 validation module; C4.1 dossier generator v1 + C4.2 minimal map; C6.2 buyer
-identification for 2–3 live BC stories; C6.1 comps collection begins.
+Ontario is consequently the strongest slice available on every axis that matters here:
+ownership and expiry (C1.4/C1.5/C1.6/C6.2), real activity history (C1.3/C2.6/C6.3 runnable
+now, not in four quarters), 172,259 OMEIS exploration drillholes with `HOLE_TYPE` and
+`ELEMENTS` (C2.4), 62,357 AFRI assessment reports (C3.4/C5), and online map staking.
+
+Build: C1.1–C1.6 for ON; C2.1 (text→prospectivity, national corpus, validated on published
+Canadian Zn-Pb results) + C2.2 (ScienceBase benchmark layers) + C2.4 Tier-1 negatives from
+OMEIS + C2.5 validation module; C4.1 dossier generator v1 + C4.2 minimal map; C6.2 buyer
+identification for 2–3 live Ontario stories; C6.1 comps collection begins.
 *Gate G1 (thesis test):* **5–10 human-reviewed dossiers for real open ground adjacent to
 real active stories, each with a named probable buyer and a defensible price range.** If
 the best-covered jurisdiction cannot produce credible candidate deals, the fix is in deal
 selection (C1/C6), not in more modelling — decide before horizontal investment.
 
-*Ontario is not abandoned:* it retains online map staking, 62,357 AFRI assessment reports
-and the OMEIS drillhole layer, and remains the priority for C3.4/C5 report work and for
-open-ground/dossier output. Only the ownership- and history-dependent components move.
+*British Columbia is the second jurisdiction,* and remains the stronger one for evidence:
+RGS2020 geochem (65,008 × 193), MINFILE 15,142 deposits, and tenure carrying `OWNER_NAME`
+and `CLIENT_NUMBER_ID`. Its weakness is temporal — a current-registry layer with no dropped
+ground — which C3.1 fixes forward.
 
 **Phase 2 — Economics + on-demand text (≈3 weeks).** C6.1–C6.5 built properly; C3.4
 on-demand report fetch for ON AFRI + BC ARIS; C5.1 due-diligence RAG; C5.2 barren
@@ -257,7 +272,7 @@ comps-anchored valuation, and buyer capacity — i.e., a dossier you would actua
 
 **Phase 3 — Modality closure + expansion (≈4 weeks).** C3.2 national geophysics grids;
 C3.3 STAC remote sensing + DEM; C2.7 full-stack MPM baselines with SHAP; C1 extended to
-ON (subject to C0.9), SK, YT, NU; QC GESTIM bulk-licensing decision executed (see Risks).
+BC, SK, YT, NU; QC GESTIM bulk-licensing decision executed (see Risks).
 *Gate G3:* a 4-modality prospectivity model with spatially-blocked CV scores, run with and
 without tenure-derived features. **The year-N→N+1 staking backtest is deferred to whenever
 the snapshot archive spans two comparable periods** — it cannot be run at Phase 3 on data
@@ -287,10 +302,15 @@ maturity; remaining jurisdictions.
   business depends on. The moat is real but its clock starts the day C3.1 runs, which is
   why C3.1 is now Phase 0. Treat any pre-archive staking series as descriptive and label it
   survivorship-biased wherever it appears.
-- **Ontario publishes no ownership or expiry.** (Audit A2.) OGSEarth exposes only claim
-  number, cell type and status — verified at the raw KMZ level. C1.4/C1.5/C1.6/C6.2 cannot
-  run on Ontario until C0.9 determines whether MLAS abstracts are retrievable at scale.
-  The LIO ArcGIS `MLAS` folder returns 403; the public SPA is the only visible route.
+- **Verify the product, not just the portal.** (Audit A2 → F.) For half a day this plan
+  recorded "Ontario publishes no ownership or expiry" as a standing risk and moved Phase 1 to
+  BC because of it. The finding was rigorous about the OGSEarth KMZ — checked to the raw tile
+  — and wrong about Ontario: the MLAS operational bulk shapefiles publish `HOLDER`,
+  `ISSUE_DATE`, `ANNIVERSAR` and `CLAIM_DUE_` openly, daily, on twice as many claims as the
+  KMZ carries. **The standing risk is the general one:** a jurisdiction's most visible
+  endpoint is often not its authoritative one, and an absence proved against one product is
+  not an absence. Before recording any dataset as unavailable, enumerate the agency's bulk
+  download page — not only its map service and open-data catalogue.
 - **Heat is public.** Staking velocity is observable by anyone with the same idea; ON/BC
   professional stakers already watch lapses. The defensible edge is the joined signal
   (heat × criticality × geology × barren-veto × buyer capacity) plus the point-in-time

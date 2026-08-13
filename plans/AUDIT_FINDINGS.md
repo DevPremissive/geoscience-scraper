@@ -62,6 +62,12 @@ NU_MINERAL_CLAIMS 1 · YT_QUARTZ_CLAIMS 1 · YT_PLACER_CLAIMS 1 · NB_MINERAL_CL
 
 ### A2 — Ontario carries no owner or dates; BC/YT carry attributes but only for surviving tenures
 
+> ⚠️ **SUPERSEDED IN PART BY FINDING F — read that before acting on this.** The Ontario half
+> of A2 is true of the OGSEarth KMZ and **false of Ontario**: the MLAS bulk shapefiles publish
+> `HOLDER`, `ISSUE_DATE`, `ANNIVERSAR`, `CLAIM_DUE_` on 401,594 claims, plus 431,557 cancelled
+> claims with termination dates. The BC/YT survivorship analysis below still stands. Kept
+> unedited as the record of what was checked and how the wrong conclusion was reached.
+
 ```
                     Ontario ON_CLAIMS2   BC_MTA_CURRENT              YT_QUARTZ_CLAIMS
 owner fields        (none)               OWNER_NAME, CLIENT_NUMBER_ID,   (none)
@@ -264,7 +270,7 @@ GET mlas.mndm.gov.on.ca/mlas/search/searchIndex.html → 200, AngularJS 1.x SPA 
 GET /mlas/views/js/app.config.js → 200, vendor boilerplate ("SmartAdmin"), no endpoint constants
 ```
 
-Claim abstracts are at `#/search/searchClaimDetails?claimNumber=NNNNNN`. Ownership requires an XHR capture or per-claim retrieval → **C0.9 spike**.
+Claim abstracts are at `#/search/searchClaimDetails?claimNumber=NNNNNN`. **Superseded by finding F below** — this route is unnecessary; the bulk shapefiles carry `HOLDER` openly.
 
 ---
 
@@ -352,7 +358,7 @@ spatial geometry, not the attribute data.
 
 ```
 DRILLHOLE coverage by jurisdiction (gpkg layers + parquet tables):
-  BC     — none registered —          ← Phase-1 jurisdiction
+  BC     — none registered —          ← second jurisdiction (was Phase-1 when this was found)
   ON     — none registered —          (172,259 available via OMEIS ArcGIS, see C1)
   QC     QC_SIGEOM_DRILLHOLES  187,321
   NB     NB_DRILLHOLE           17,887
@@ -360,7 +366,7 @@ DRILLHOLE coverage by jurisdiction (gpkg layers + parquet tables):
 grep BC_ sources.py | grep -i 'drill|hole|aris'  →  only BC_ARIS_PDF (a scrape stub)
 ```
 
-**This is a real cost of the BC switch and it was not visible before the switch was made.**
+**This was a real cost of the BC switch. With Phase 1 back on Ontario (finding F) the urgency drops — OMEIS supplies 172,259 ON holes — but the BC gap remains real for the second jurisdiction.**
 C2.4 Tier-1 negatives and the C4 dossier Drilling section have no BC input. The handoff noted
 "BC (no drillhole source registered)" in passing under Drillholes; it did not carry through to
 any plan. Recorded now in MASTER §6b, PLAN_C0 §0.1/0.2 (discovery task), PLAN_C2 §2.4
@@ -379,7 +385,106 @@ any plan. Recorded now in MASTER §6b, PLAN_C0 §0.1/0.2 (discovery task), PLAN_
 
 ---
 
+## F. MLAS bulk shapefiles — **A2 was wrong about Ontario** (2026-08-13, third pass)
+
+Finding A2 concluded that "Ontario carries no owner and no dates". That is accurate **about
+the OGSEarth KMZ superoverlay** — verified at raw-tile level, and the province itself labels
+that product "an unofficial version to be used for viewing purposes only". It is **false
+about Ontario**. The official bulk product was one URL away and the project was never
+harvesting it.
+
+```
+https://www.geologyontario.mndm.gov.on.ca/mines/documents/claimaps/mlas_operational_gis_data.zip
+HTTP 200 · 208,080,564 bytes · Content-Type: application/x-zip-compressed
+Last-Modified: Thu, 13 Aug 2026 12:48:22 GMT     ← same day; regenerated continuously
+```
+
+ESRI shapefiles, no auth, no scraping, no API key. Attribute schemas as read:
+
+| Layer | Features | Fields |
+|---|---|---|
+| `Operational_Cell_Claims` | **401,594** | `TENURE_NUM, TITLE_TYPE, TITLE_TY_1, TENURE_STA, TENURE_S_1, ISSUE_DATE, ANNIVERSAR, EXTENSION_, CLAIM_DUE_, HOLDER` |
+| `Cancelled_Claim_Polygons` | **431,557** | `TENURE_HIS, TENURE_NUM, REVISION_N, TITLE_TYPE, UPDATE_TIM, ENTRY_TIME, ISSUE_DATE, ANNIVERSAR, EXTENSION_, TERMINATIO, STATUS, HOLDER` |
+| `MEM_Boundary_Claims` (+`_point`) | 22,074 / 149,955 | `LegClmNu, Cell_ID, AREA_HA, TOWNSHIP, TENURE_NUM, ISSUE_DATE, ANNIVERSAR, HOLDER, CLAIM_DUE_, STATUS` |
+| `Mining_Land_Tenure` | 22,940 | `TENURE_NUM, TITLE_TYPE, DISPOSITIO, AREA_IN_HE, EXPIRY_DAT, TAX_RENT_E, HOLDER, STATUS` |
+| `Non_Mining_Land_Tenure` | 193,757 | `NON_MINING, DISP_LABEL, TITLE_TYPE, EFFECTIVE_, DISPOSITIO, …` |
+| `Operational_Alienations` | 16,812 | `ALIENATION, ALIEN_ID, ALIEN_DESC, JUSTIFICAT, …` |
+| `Plans_Permits` | 799 | `EARLY_EXPL, PROJECT_NA, TOWNSHIP_N, TENURE_HOL, HOLDER` |
+
+Plus per-layer metadata PDFs and a Terms of Use document.
+
+### F1 — Ownership is complete (closes gap #11)
+
+```
+Operational_Cell_Claims: 401,594 rows
+  HOLDER      non-null 401,594 (100.0%)   distinct holders: 1,403
+  ISSUE_DATE  non-null 401,594 (100.0%)
+  ANNIVERSAR  non-null 401,594 (100.0%)
+  CLAIM_DUE_  non-null 401,594 (100.0%)
+top holders: (100) KENORLAND EXPLORATION LTD 54,020 · (100) Juno Corp. 28,164
+             (100) Wyloo Ring of Fire Ltd. 13,796 · (100) AGNICO EAGLE MINES LIMITED 8,912
+```
+
+Ownership percentage is embedded in the `HOLDER` string as a `(NN)` prefix and must be
+parsed out; multiple holders per claim appear as separate percentage-prefixed entries.
+**C0.9's MLAS scraping spike is unnecessary** — the LIO ArcGIS 403 and the AngularJS SPA were
+both dead ends around a door that was already open.
+
+### F2 — Eight years of unbiased staked-and-dropped history (reverses gap #10 for Ontario)
+
+The register's #10 asserts that registries publish current holdings only, so dropped ground
+is invisible and history can only accrue forward. **Ontario retains its cancellations:**
+
+```
+Cancelled_Claim_Polygons: 431,557 rows
+  ISSUE_DATE   non-null 431,557   range 2018-04-06 .. 2026-08-12
+  TERMINATIO   non-null 311,074   range 2018-05-08 .. 2026-08-13
+  HOLDER       non-null 326,212
+terminations/yr  2019: 47,891 · 2020: 22,446 · 2021: 6,070 · 2022: 33,336
+                 2023: 42,494 · 2024: 51,390 · 2025: 73,400 · 2026: 26,691
+STATUS  Cancelled 303,138 · Amalgamated 102,966 · Active 20,038 · Leased 2,674 · Merged 2,379
+```
+
+This makes C1.3 heat, C2.6's staking backtest and C6.3's retroactive entry-window test
+runnable on Ontario **today** rather than after four quarters of forward snapshots.
+
+**Three caveats that must travel with it:**
+1. **History begins 2018-04-06**, when Ontario converted to map staking. Pre-2018 legacy
+   claims are in the separate administrative bundle (`endm_administrative_gis_data.zip`),
+   not examined here.
+2. **`STATUS` must be split before use.** Only the 303,138 `Cancelled` are genuine
+   abandonment; `Amalgamated` (102,966) and `Merged` (2,379) are administrative
+   reorganisations and would read as false drops.
+3. **Terms of Use unread.** The bundled `_Terms of Use.htm` is an "MNDM Electronic
+   Information Products" agreement whose substantive clauses did not extract cleanly. Read
+   it before any dossier carrying this data leaves the machine (C4.1 sales render).
+
+### F3 — The current Ontario harvest is the wrong product and undercounts by half
+
+```
+currently harvested (OGSEarth KMZ)  202,407 claims · no attributes beyond number/type/status
+MLAS Operational_Cell_Claims        401,594 claims · HOLDER + 3 date fields
+MLAS Cancelled_Claim_Polygons       431,557 historical records
+```
+
+`sources.py` should register the MLAS bundle as the authoritative Ontario tenure source and
+demote the OGSEarth KMZ to a fallback. Note the 202,407 figure — which the plans, `COVERAGE.md`
+and this audit's §0 all report as verified — is *correct for what was harvested* and *wrong
+as a count of Ontario mining claims*. Exactness is not the same as completeness.
+
+### F4 — Access difficulty, as scoped
+
+| Route | Verdict |
+|---|---|
+| **MLAS operational bulk ZIP** | **Open. One `sources.py` entry.** No auth, daily refresh |
+| `data.ontario.ca` "Mining Claims Information Database" | **Restricted** — "reviewing the data to determine if it can be made open"; last validated 2016 |
+| LIO ArcGIS `MLAS` folder | **403 Forbidden** (Azure Application Gateway) |
+| MLAS Map Viewer SPA | AngularJS 1.x; `app.config.js` is vendor boilerplate. Moot |
+| ONLAND (`onland.ca`) | For PINs/title documents on mining **patents and leases** only |
+
+---
+
 ## Change log
 
 - **2026-08-13** — initial audit; all findings above recorded after a second challenge pass. Six first-pass conclusions were corrected: B1 strengthened, B2 reframed, B4/D3/D5-Chroma downgraded, A2 qualified.
-- *(C0.9 MLAS spike memo to be appended here.)*
+- **2026-08-13 (third pass)** — finding F: the MLAS operational bulk shapefiles overturn A2. Ontario ownership and an unbiased 2018-onward staked/dropped history are openly published. Phase 1 reverted to Ontario; C0.9 withdrawn; gap #11 closed and #16 opened.

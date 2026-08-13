@@ -16,13 +16,21 @@ health checks).
 
 ## 3.1 Scheduling & operational hardening (~2 days) — **MOVED TO PHASE 0**
 
-> **Resequenced 2026-08-13 (audit D1).** This was the last thing to be built; it is now
-> among the first. The lake holds **two snapshot dates one day apart**, and the tenure
-> registries publish current holdings only — so no amount of later work recovers history
-> that was not captured. C1.3 heat, C2.6 backtest and C6.3 momentum are all gated on an
-> archive that does not start until this timer runs. Every week of delay is a week of
-> unbiased history permanently lost. Build 3.1 and 3.6 in Phase 0; Gate G0 now requires
-> ≥7 consecutive days of unattended daily tenure snapshots.
+> **Resequenced 2026-08-13 (audit D1), and it stays resequenced (audit F2).** This was the
+> last thing to be built; it is now among the first. The lake holds **two snapshot dates one
+> day apart**, and most tenure registries publish current holdings only — so no amount of
+> later work recovers history that was not captured.
+>
+> Ontario turns out to be an exception: its cancellation register supplies an unbiased
+> 2018-onward history, which unblocks C1.3, C2.6 and C6.3 for Phase 1 without waiting. **That
+> does not relax this item.** BC, YT, NU and SK have no equivalent register and never will
+> without forward capture; Ontario's own register begins at map-staking conversion in 2018-04
+> and is refreshed in bulk rather than continuously, so daily snapshots still catch
+> within-period churn — stake-and-drop inside a single refresh cycle, and same-day
+> corrections — that the register flattens.
+>
+> Build 3.1 and 3.6 in Phase 0; Gate G0 requires ≥7 consecutive days of unattended daily
+> tenure snapshots.
 
 Cadence is decision-driven, never uniform:
 

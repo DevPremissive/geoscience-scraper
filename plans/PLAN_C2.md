@@ -151,7 +151,7 @@ applies only generically with reduced weight; depth nulls likewise.
 
 > **Jurisdiction coverage warning (gap register #13).** C2 is national, so the negatives
 > table is built from wherever drillholes exist — QC 187,321, NB 17,887, ON 172,259 via
-> OMEIS. **British Columbia, the Phase-1 jurisdiction, has no drillhole source registered
+> OMEIS. **British Columbia, the second jurisdiction, has no drillhole source registered
 > at all.** Phase-1 BC dossiers will therefore have no drill-based veto flags and no
 > non-barren highlights, and C4.1's "NOT AVAILABLE — <reason>" block must state that
 > plainly rather than rendering an empty section. C0.1 carries a half-day discovery task to
@@ -188,30 +188,38 @@ review of a 10% sample before any Tier-2 batch enters training.
   calibrated probabilities-of-usefulness, not raw margins.
 - Random-split results may be computed for curiosity but are barred from model cards.
 
-## 2.6 Staking backtest (~2 days build; **cannot run until the archive spans two periods**)
+## 2.6 Staking backtest (~2 days) — **runnable on Ontario now**
 
-> **Deferred 2026-08-13 (audit A1/A2).** This is the plan's business-shaped metric and it is
-> currently unrunnable. The lake holds **two snapshot dates one day apart**; C0.7's assumed
-> backfill does not exist. The obvious substitute — deriving year-Y staking from tenure
-> attributes — **does not work either**, and the reason matters: BC and YT publish
-> *current-registry* layers (BC `TERMINATION_DATE` non-null on 23 of 42,285 rows; YT 2,603
-> expired against 164,985 active). Ground staked in year Y and dropped before today is
-> simply absent. A backtest trained on survivors would score the model on "ground that was
-> staked *and kept*", flattering it in exactly the direction that matters least — the
-> business is built on finding ground that gets dropped.
+> **Deferred, then restored the same day (audit A1/A2 → F2).** The first-pass conclusion was
+> that no unbiased year-Y staking labels existed anywhere: the lake holds two snapshot dates,
+> and BC/YT publish current-registry layers where ground staked in year Y and dropped before
+> today is simply absent — a backtest on survivors would score the model on "ground that was
+> staked *and kept*", flattering it in exactly the direction that matters least.
 >
-> **Therefore:** build `backtest.py` in Phase 1 against synthetic and single-pair fixtures so
-> the harness is ready and tested, but do not report backtest numbers, and do not gate Phase
-> 3 on them (Master §7 G3 amended). Run it for real when C3.1's daily snapshots span two
-> comparable periods. Yukon's `STAKING_DATE` series (back to 1902, int64 epoch-ms) may be
-> shipped meanwhile as a **descriptive** staking-rate chart carrying
-> `survivorship_biased = true` — never as backtest ground truth.
+> **Ontario is the exception and it is enough.** `Cancelled_Claim_Polygons` retains 431,557
+> records with `ISSUE_DATE` and `TERMINATIO` from 2018-04-06, so for any year Y in 2018–2025
+> the set of cells staked in year Y is fully reconstructible *including* those since dropped.
+> That is genuine, unbiased backtest ground truth over seven year-pairs.
+>
+> **Conditions of use:**
+> - Restrict labels to `STATUS == 'Cancelled'` plus currently-active claims. `Amalgamated`
+>   and `Merged` are administrative and are neither stakes nor drops.
+> - Ontario only. Do not pool other jurisdictions into the label set until C3.1 has accrued
+>   comparable coverage there — mixing a complete register with survivor-only layers would
+>   reintroduce the bias silently.
+> - Yukon's `STAKING_DATE` series (back to 1902, int64 epoch-ms) remains **descriptive only**,
+>   carrying `survivorship_biased = true`; never a backtest label.
+>
+> Master §7 G3 is amended accordingly: the backtest is back on the Phase-3 gate, scoped to
+> Ontario.
 
 The business-shaped metric: does the model rank ground the industry subsequently paid to
 stake?
 - `backtest.py`: features frozen at snapshot year Y → labels = r7 cells intersecting
-  `staked` tenure events in year Y+1 (from the C3.1 forward archive; multiple Y once
-  snapshots allow).
+  `staked` tenure events in year Y+1. For Ontario these come from the MLAS cancellation
+  register (`ISSUE_DATE` for the stake, `TERMINATIO` for the drop), giving seven usable
+  year-pairs across 2018–2025; elsewhere they come from the C3.1 forward archive once
+  snapshots allow.
 - **Leakage control (binding):** run every backtest twice — with and without
   tenure-derived features (heat, `ever_staked_count`) — and report both. The gap measures
   momentum-following vs geological skill; both are useful, but the model card must say
@@ -249,7 +257,7 @@ modelled; not a general ontology project.
 - [ ] 2.1 model card with blocked-CV scores + benchmark comparison, human-reviewed map
 - [ ] 2.4 negatives table populated for ON+QC+NB Tier 1, **hole-type-filtered**; veto flags rendering in a sample dossier
 - [ ] 2.5 in place before any training run exists in the registry
-- [ ] 2.6 harness built and fixture-tested — **backtest report deferred until the C3.1 archive spans two periods** (audit A1/A2)
+- [ ] 2.6 backtest report for ≥1 Ontario year-pair, both feature regimes (audit F2)
 - [ ] 2.7 4-modality model card + story-extension JSON for one live block
 
 ## Handoff notes for detailed planning

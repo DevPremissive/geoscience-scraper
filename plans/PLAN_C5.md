@@ -12,20 +12,23 @@ ground and currently sits at zero bytes on disk.
 > reconcile and state which unit is meant — the difference materially changes 5.3's harvest
 > volume and storage estimates.
 >
-> **Phase 1 is now BC (Master §7),** which also makes **BC ARIS the first corpus** rather
-> than a second — consistent with 5.3's existing "ARIS first" ordering. Three uses, built in this order —
+> **Phase 1 is Ontario** (Master §7 — briefly BC on 2026-08-13, reverted the same day per
+> audit F). For 5.1 due-diligence that means **ON AFRI reports** are the Phase-1 feedstock,
+> resolved spatially through ArcGIS layer 50 (C3.4). 5.3's corpus-scale ordering is
+> unchanged and still starts with BC ARIS, which remains the richest per report — the two
+> are independent decisions. Three uses, built in this order —
 value-per-token descending, effort ascending:
 
 1. **Target-time due diligence** (per-deal RAG — small, immediate, Phase 2)
 2. **Barren confirmation** (Tier-2 negative upgrades + intercept positives — Phase 2)
 3. **Corpus-scale harvest + NER features** (heavy, deferrable — Phase 4)
 
-> **Possible reprioritisation (gap register #13).** BC — the Phase-1 jurisdiction — has **no
-> drillhole dataset registered**. If C0.1's discovery task confirms that BC drill data exists
-> only inside ARIS assessment reports, then 5.2 is not a Phase-2 nicety: it becomes the only
-> route to drill evidence for Phase-1 dossiers, and should move forward with a narrow scope
-> (intercepts and barren verdicts for holes on or adjacent to candidate ground, not the
-> corpus). Decide at Gate G0.
+> **Reprioritisation pressure lifted (gap register #13).** This note previously argued 5.2
+> might have to move into Phase 1, because BC — then the Phase-1 jurisdiction — has no
+> drillhole dataset registered. With Phase 1 back on Ontario and OMEIS supplying 172,259
+> exploration holes with `HOLE_TYPE` and `ELEMENTS`, drill evidence is available without
+> report extraction and **5.2 stays in Phase 2**. The BC drillhole gap remains real and still
+> matters when BC becomes the second jurisdiction.
 
 **Depends on:** C3.4 (`fetch_reports`), C0.1 (OAFD index repair for ON ID resolution),
 local LLM stack (chat `:8082`, mxbai `:8083`, ChromaDB, rag-proxy `:9100`).

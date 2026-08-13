@@ -217,6 +217,63 @@ Two Phase-1 dependencies remain open regardless of jurisdiction: the raster/fabr
 (#3) and the container-sniffing fix (#12), which unblocks QC and BC bedrock geology for the
 C2.1 corpus.
 
+## 6c. Tenure-history horizon by jurisdiction (verified 2026-08-13, audit G)
+
+Every jurisdiction's digital tenure record begins at its **conversion from ground staking to
+online map staking**. That single event, not digitisation policy, is why the usable history
+horizon differs by more than twenty years across Canada. Planning must treat the horizon as a
+per-jurisdiction constant.
+
+| Juris | Converted | System | Unbiased drop history from | Pre-conversion recoverable |
+|---|---|---|---|---|
+| QC | 2000 | GESTIM | 2000 (if cancellations retained — unverified) | — |
+| BC | 2005-01-12 | MTO | 2005 (via Tenure History SP + Client XREF) | ground-staked "legacy claims" continued |
+| NL | 2005-02-28 | MIRIAD | 2005 (unverified) | — |
+| NB | 2010-04-14 | e-CLAIMS | 2010 (unverified) | — |
+| SK | 2012-12-06 | MARS | shallow — Lapsed layer holds 357 rows | — |
+| NS | 2013-08 | NovaROC | 2013 (unverified) | — |
+| **ON** | **2018-04-10** | MLAS | **2018-04** — 431,557 cancelled claims | `MENDM_Legacy_Claims`: 33,439 survivors with recording dates to **1980**; scanned claim maps; pre-MLAS CLIMS database is access-restricted |
+| NU | 2021-01-30 | Map Selection | 2021-01 | ground-staked claims converted to "unit claims" |
+| **YT** | **never** | physical staking | **1990s onward, already on disk** — `YT_HISTORICAL_CLAIMS` 244,703 with owner + dates back to 1899 | n/a |
+| MB / NT | never | physical staking | none published | — |
+
+**Two counter-intuitive consequences.**
+
+1. **The jurisdictions that never modernised have the deepest history.** Yukon never converted,
+   so its register was never truncated — 238,398 expired tenures with owners and staking dates,
+   already harvested and sitting unexamined in `geo.gpkg`. Ontario, the most modern system,
+   has the shortest unbiased window of the major jurisdictions.
+2. **Ontario's pre-2018 window is asymmetric.** Staking dates for *survivors* reach back to
+   1980 via `MENDM_Legacy_Claims`; ground *dropped* before 2018-04 is not recoverable from any
+   public product. Any pre-2018 Ontario series must therefore be labelled
+   `survivorship_biased = true`, exactly as the BC/YT current-registry layers are — while the
+   post-2018 Ontario series is clean.
+
+## 6d. New-dataset acquisition register (audit G4)
+
+None of these is registered in `sources.py`. Ordered by value per unit of effort — the top
+three cost essentially nothing.
+
+| # | Jurisdiction / dataset | What it unlocks | Effort |
+|---|---|---|---|
+| **N1** | **YT `YT_HISTORICAL_CLAIMS`** — already harvested | 244,703 owner-attributed expired tenures, staking dates to 1899. Makes YT a full C1/C2/C6 jurisdiction immediately | **none** — promote the layer, parse epoch-ms dates |
+| **N2** | **NS Mineral Rights Database** — already harvested | NS tenure entirely absent from `geo.gpkg` today; unblocks a whole jurisdiction | **none** — fixed by the C0.2 container sniff (gap #12) |
+| **N3** | **ON `endm_administrative_gis_data.zip`** | `MENDM_Legacy_Claims` (33,439, dates to 1980) + the 5.2 M-cell provincial grid, mining divisions, lots/concessions | one registry entry, 640 MB |
+| **N4** | **SK `Mineral_Tenure_Crown_Dispositions`** FeatureServer | SK tenure with `OWNERS` + `EFFECTIVED` + `GOODSTANDI` (7,456) — we hold no SK tenure at all today; plus **Re-opening Lands** with `POSTEDON`, a direct staking-opportunity feed | existing `arcgis` connector |
+| **N5** | **BC Client Tenure XREF + Person Organization MVW** | Ownership join and client identity — turns BC's 303,235-row tenure history from geometry into attributed events; feeds C1.4 entity resolution | BCGW download |
+| **N6** | **BC `MTA_ACQUIRED_TENURE_HISTORY_SP`** | 303,235 historical tenure geometries back to 2005 | existing `wfs` connector |
+| **N7** | **BC Reserve Sites + Land Reserve History** | The "no-registration reserve" subtraction layer C1.1 lists as a needed new source, current and historical | WFS/BCGW |
+| **N8** | **QC GESTIM bulk FTP** | QC *tenure* — we harvest SIGÉOM geoscience but hold no QC claims at all. Weekly refresh | new registry entry |
+| **N9** | **NU Mineral Tenure — Mineral Claims** | Daily claim extents; NU history starts 2021-01 | `open.canada.ca` |
+| **N10** | **BC Application / Application Event** | Candidate true tenure-event log rather than snapshot diffs | BCGW |
+| **N11** | ON Historical Mining Claim Maps | Scanned township claim maps, pre-digital. Diligence aid only — not georeferenced, no bulk download | low priority |
+| **N12** | ON Mining Claims Information Database | The pre-MLAS system of record | **access-restricted — send one email** |
+
+**Sequencing note.** N1–N3 belong in C0 alongside the MLAS registration, because they change
+what Phase 1 can demonstrate at no acquisition cost. N4–N7 belong with the jurisdiction they
+serve. N8 matters when QC comes into scope and is the only route to Québec tenure, which
+§8 already flags as the largest coverage risk.
+
 ## 7. Roadmap
 
 Phases are gated; a phase does not start until the prior gate passes human review.

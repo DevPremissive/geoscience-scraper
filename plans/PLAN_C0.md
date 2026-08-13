@@ -317,6 +317,50 @@ lapse watch), so it is built here, hardened, not as a C1 afterthought.
   is 768-dim (Ollama nomic) and holds 4 rows — drop it rather than migrate; ensure every new
   collection records its embedding model and dimension in collection metadata.
 
+## 0.10 New-dataset acquisitions (~1.5 days) — *added 2026-08-13, audit G4*
+
+Master §6d holds the full register. Three items belong in C0 because they cost almost nothing
+and change what Phase 1 can demonstrate:
+
+**N1 — Promote `YT_HISTORICAL_CLAIMS` (no acquisition).** 244,703 features are already in
+`geo.gpkg`, harvested in June and never examined: `OWNER_NAME` 100% populated (4,045 distinct),
+`STAKING_DATE` 1899→2026, `EXPIRY_DATE`, `TENURE_STATUS` (238,398 `Expired`). Parse the
+epoch-**millisecond** dates (`unit="ms"`), split `TENURE_STATUS`, and feed it to `tenure_events`
+exactly as Ontario's cancellation register is fed. This makes Yukon a full C1/C2/C6
+jurisdiction for the price of reading a layer we already own — and gives a **second**
+independent history for cross-validating the heat and backtest code.
+
+**N2 — Nova Scotia falls out of the 0.2 fix (no acquisition).** The NS Mineral Rights Database
+is already on disk as `Mineral Rights Database (geodatabase).gdb` and `(shapefile).shp`, both
+of which are misnamed ZIPs. NS currently has **zero** layers in `geo.gpkg`. The container-sniff
+change in 0.2 unblocks an entire jurisdiction; add NS to that acceptance test.
+
+**N3 — Register `endm_administrative_gis_data.zip` (640 MB, one entry).** Contains
+`MENDM_Legacy_Claims` — 33,439 claims live at the 2018-04-10 conversion with `DATE_COM` back to
+**1980** (1980s 6,086 · 1990s 2,433 · 2000s 10,641 · 2010s 14,279) — plus the 5.2 M-cell
+provincial grid, mining divisions, exploration regions and lots/concessions. The grid is also
+what C0.5's fabric work should be validated against, since it is the actual tenure lattice.
+
+> **Read the legacy layer correctly.** Every row is `STATUS = 'Active'` and only 1,175 of
+> 33,439 carry a `DATE_CNCL`: it is the *survivors* at conversion, not a drop history. It
+> extends Ontario's **staking-date** reach to 1980 (good for `ever_staked_count` and for dating
+> long-held ground) but ground abandoned before 2018-04 is not recoverable from any public
+> product. Emit anything derived from the pre-2018 window with `survivorship_biased = true`;
+> the post-2018 `Cancelled_Claim_Polygons` series is clean and must not carry that flag.
+
+**Also register while in the file (N4–N7, ~half a day each, existing connectors):** SK
+`Mineral_Tenure_Crown_Dispositions` FeatureServer — layer 0 gives SK tenure with `OWNERS`,
+`EFFECTIVED`, `GOODSTANDI` (7,456 features; we hold **no** SK tenure today), layer 3 Lapsed,
+and layer 2 **Re-opening Lands** with `POSTEDON`, which is a staking-opportunity feed C1.6
+never anticipated. BC's `MTA_ACQUIRED_TENURE_HISTORY_SP` (303,235, `wfs` connector) is only
+useful once the **Client Tenure XREF** is registered alongside it — the history layer itself
+carries no dates or owner.
+
+**Acceptance:** `tenure_events` populated from three independent registers (ON cancellations,
+YT historical claims, BC history+XREF) with the same schema and a spot-check of 10 events per
+jurisdiction; NS layers present in `geo.gpkg`; SK tenure present with owners; the Ontario
+provincial grid loaded and reconciled against C0.5's fabric.
+
 ## 0.9 ~~MLAS ownership spike~~ — **WITHDRAWN 2026-08-13, same day it was added**
 
 The spike existed because Ontario appeared to publish no owner or expiry. It does — through
@@ -341,6 +385,7 @@ whether the licence permits redistribution inside a dossier that leaves the mach
 - [ ] 0.5 fabric + demonstration **Ontario** feature matrix, deterministic
 - [ ] 0.7 Ontario `tenure_events` built from the cancellation register (2018-04 onward, `STATUS` split); diff engine verified on the 06-12→06-13 pair; **C3.1 running ≥7 days** for the jurisdictions without a cancellation register
 - [ ] 0.8 docs truthful (`COVERAGE.md` rewritten)
+- [ ] 0.10 N1 YT historical claims promoted · N2 NS layers in `geo.gpkg` · N3 ON legacy claims + provincial grid registered · N4 SK tenure with owners
 - [ ] C3.1 + C3.6 operational (pulled into Phase 0 — see Master §7)
 
 ## Handoff notes for detailed planning

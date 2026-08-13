@@ -484,6 +484,135 @@ as a count of Ontario mining claims*. Exactness is not the same as completeness.
 
 ---
 
+## G. Why digital tenure records start when they do — and what exists before (2026-08-13, fourth pass)
+
+**The split has a single cause: each jurisdiction's conversion from ground staking to online
+map staking.** At conversion, live claims were converted onto a grid and the new system's
+record begins; claims already dropped were not carried across. The date differs by
+jurisdiction by more than two decades, which is why "recent digital start" looks like a data
+problem but is really a regulatory timeline.
+
+### G1 — Conversion dates across Canada
+
+| Juris | Online/map staking from | System | Conversion mechanics |
+|---|---|---|---|
+| **QC** | **2000** | GESTIM (built 1995–2001, $2.9 M) | Map designation (*claim désigné sur carte*) becomes the principal acquisition method |
+| **BC** | **2005-01-12** | Mineral Titles Online (MTO) | Ground-staked claims continued as "legacy claims"; no new ground staking. 1 M ha acquired in week 1 |
+| **NL** | **2005-02-28** | MIRIAD | First online staking system in Canada; all claims must be staked electronically |
+| **NB** | **2010-04-14** | NB e-CLAIMS (truePERMIT) | Physical stakes replaced by online registry |
+| **SK** | **2012-12-06** | MARS | Disposition parcels replace physical staking; staking rate rose 5× |
+| **NS** | **2013-08** | NovaROC | Previously in-person registration only, at Halifax |
+| **ON** | **2018-04-10** | MLAS | Paper staking ended 2018-01-08; 90-day hiatus; legacy claims **converted, not cancelled**, onto a 5.2 M-cell grid (17.7 ha north → 24 ha south) |
+| **NU** | **2021-01-30** | Map Selection (CIRNAC) | Regulations in force 2020-11-01; mandatory one-time conversion of ground-staked claims to grid "unit claims" on day 91 |
+| **MB** | — | ground staking | Physical posts and tags still required |
+| **YT** | — | physical staking | Posts in the ground; online viewer is research-only |
+| **NT** | — | physical staking | Claim posts, registration within 60 days |
+| **AB** | n/a | permits via AER | Permit/lease system, not staking; no public claims API |
+
+**The corollary that matters commercially:** a jurisdiction's unbiased staked-and-dropped
+history can only start at its conversion date. Ontario's begins 2018-04; Nunavut's 2021-01.
+BC's, NL's and QC's are old enough (2000–2005) to be genuinely deep — **if** those registries
+retain their cancellations, which is the question G3 answers per jurisdiction.
+
+### G2 — Ontario before 2018: what actually exists
+
+The user recalled using an online Ontario claims system as early as 2014. That is consistent —
+**CLAIMaps** (the claim-map viewer) launched April 2016, with earlier viewers before it, and
+Ontario had some map-staked claims pre-2018. But viewing ≠ a retained event record. Three
+pre-2018 products exist, and only the first is structured:
+
+**1. `MENDM_Legacy_Claims` — the conversion snapshot.** In
+`endm_administrative_gis_data.zip` (640 MB, `Last-Modified` 2021-06-29, i.e. static):
+
+```
+33,439 features
+fields: OBJECTID, OGF_ID, RECON, CLAIM_NUM, DATE_COM, DATE_CNCL, GROUPID,
+        STATUS, GEOMETRY_U, EFFECTIVE_, SYSTEM_DAT, Shape_Leng, Shape_Area
+DATE_COM  range 1980-01-01 .. 2018-07-28   (100% populated)
+  per decade: 1980s 6,086 · 1990s 2,433 · 2000s 10,641 · 2010s 14,279
+DATE_CNCL populated on 1,175 / 33,439 (3.5%)
+STATUS    single value: 'Active'
+OWNER     — no owner field at all
+```
+
+**Read it correctly:** every row is `Active`, so this is the set of legacy claims *live at the
+2018-04-10 conversion*, carrying their original recording dates. It extends Ontario's
+**staking-date** record back to 1980 — genuinely useful for `ever_staked_count` and for
+dating long-held ground. It does **not** contain pre-2018 dropped ground: claims cancelled
+before conversion were not carried across. So it is survivorship-biased for the pre-2018
+window in exactly the way `Cancelled_Claim_Polygons` is not for the post-2018 window.
+
+**2. Historical Mining Claim Maps** — every pre-digital claim map, hand-drawn on linen, paper
+and later Mylar, scanned to PDF and indexed alphabetically by township. Hundreds of files, some
+to 100 MB, **not georeferenced, no bulk download, no API**. Useful for deep diligence on a
+named township; not a structured dataset. Low priority.
+
+**3. `data.ontario.ca` "Mining Claims Information Database"** — a subset of the Computerized
+Land Information Management System holding "all publicly held information associated with
+mining lands". **Access-restricted**: "We are reviewing the data to determine if it can be made
+open to the public", last validated 2016. This is the one worth an email — it is the pre-MLAS
+system of record.
+
+**Net answer:** Ontario's unbiased drop history starts 2018-04. Before that you can recover
+*staking dates for survivors* back to 1980, and nothing systematic about what was abandoned.
+
+### G3 — Yukon already has what Ontario's register gives, and it is already on disk
+
+**Second correction to A2.** A2 judged Yukon survivor-only from `YT_QUARTZ_CLAIMS`
+(164,985 Active / 2,603 Expired). There is a **separate layer already harvested in June and
+never examined**:
+
+```
+YT__YT_HISTORICAL_CLAIMS — 244,703 features (already in geo.gpkg)
+fields: TENURE_HISTORICAL_ID, DRAFTING_TENURE_TYPE, REGULATION_TYPE, GRANT_NUMBER,
+        LEASE_NUMBER, CLAIM_NAME, OWNER_NAME, STAKING_DATE, EXPIRY_DATE, TENURE_STATUS
+TENURE_STATUS  Expired 238,398 · Active 5,033 · Pending 1,177 · Refused 50 · Lapsed 10
+TENURE_TYPE    Quartz 226,253 · Placer 15,068 · Placer prospecting lease 3,202 · Coal 175
+OWNER_NAME     100% populated, 4,045 distinct (e.g. '40419 Yukon Inc. - 100%')
+STAKING_DATE   1899-12-30 .. 2026-04-03   (epoch-ms int64)
+EXPIRY_DATE    1992-11-29 .. 2052-03-25
+staked-then-expired per decade: 1990s 22,319 · 2000s 53,857 · 2010s 158,683 · 2020s 3,883
+```
+
+Yukon therefore has **~35 years of dense, owner-attributed, unbiased staked-and-dropped
+history**, requiring no new acquisition — only that C0 promote the layer and parse the dates.
+Note the same `- NN%` ownership-share convention as Ontario's `HOLDER`.
+
+Yukon never converted (still physical staking), so its register was never truncated by a
+conversion event. **The jurisdictions with the deepest history are the ones that never
+modernised** — the inverse of the intuition.
+
+### G4 — New datasets identified, by jurisdiction
+
+Everything below is public and machine-accessible unless noted. None is currently registered
+in `sources.py`.
+
+| Juris | Dataset | Size / content | Access |
+|---|---|---|---|
+| **ON** | `endm_administrative_gis_data.zip` → `MENDM_Legacy_Claims` | 33,439 legacy claims, `DATE_COM` to 1980 | direct ZIP (640 MB; also carries cell grid, mining divisions, lots/cons, exploration regions) |
+| ON | Historical Mining Claim Maps | scanned PDFs by township, not georeferenced | per-file HTTP; low priority |
+| ON | Mining Claims Information Database | pre-MLAS system of record | **access-restricted — worth an email** |
+| **BC** | `MTA_ACQUIRED_TENURE_HISTORY_SP` | **303,235** historical tenure geometries (revisions; no dates/owner in-layer) | WFS — existing `wfs` connector |
+| BC | MTA Mineral Titles **Client Tenure XREF** | client↔title, one title→many owners | BCGW download — **the ownership join for the above** |
+| BC | MTA Mineral Titles **Person Organization MVW** | client identity records | BCGW — feeds C1.4 entity resolution |
+| BC | MTA **Application / Application Event / Application Status Code** | application event stream | BCGW — candidate true event log |
+| BC | MTA **Mineral Reserve Sites Business View** + **Mineral & Coal Land Reserve History SP** | reserve/no-registration sites, current + historical | WFS/BCGW — C1.1 lists these as a needed "new source" |
+| BC | MTA **Crown Granted Mineral Claims** | crown grants | WFS |
+| **SK** | `Mineral_Tenure_Crown_Dispositions` FeatureServer | layer 0 **Mineral Dispositions 7,456** with `OWNERS`, `EFFECTIVED`, `GOODSTANDI`; layer 3 **Lapsed 357**; layer 2 **Re-opening Lands 74** with `POSTEDON` | ArcGIS REST — existing `arcgis` connector |
+| **NS** | Mineral Rights Database (DP493, from NovaROC, nightly) | exploration licences, leases, special licences | **already harvested** — trapped behind the misnamed-container bug (E1); NS has 0 layers in `geo.gpkg` |
+| **NU** | Mineral Tenure in Nunavut — Mineral Claims | daily-updated claim extents | `open.canada.ca` |
+| NU | Nunavut map-selection grid | grid shapefile | NRCan |
+| **QC** | GESTIM bulk FTP (`gestim.mines.gouv.qc.ca/ftp/cartes/`) | mining titles, MapInfo + Shapefile, **updated every Monday** | FTP/HTTP — not currently used; we harvest SIGÉOM geoscience but not GESTIM tenure |
+| **YT** | `YT_HISTORICAL_CLAIMS` | 244,703 with owner + dates | **already on disk** — promote, don't acquire |
+
+Two observations worth carrying into planning. First, **three of the highest-value items cost
+nothing to acquire** — Yukon's history is harvested, Nova Scotia's is harvested-but-trapped,
+and Ontario's legacy claims are one ZIP. Second, **SK layer 2 "Re-opening Lands"** is a direct
+staking-opportunity feed with a `POSTEDON` date; nothing in C1.6 anticipated that a
+jurisdiction would publish reopening ground as a layer.
+
+---
+
 ## Change log
 
 - **2026-08-13** — initial audit; all findings above recorded after a second challenge pass. Six first-pass conclusions were corrected: B1 strengthened, B2 reframed, B4/D3/D5-Chroma downgraded, A2 qualified.

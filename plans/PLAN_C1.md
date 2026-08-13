@@ -260,10 +260,18 @@ Ontario is the *best*-served jurisdiction for this component, not the worst. The
 LIO ArcGIS `MLAS` 403, the claim-abstract SPA, the access-restricted `data.ontario.ca`
 record — are catalogued in audit F4 so the search is not repeated.
 
-**The real blind spot to watch is temporal coverage elsewhere.** Ontario's cancellation
-register starts 2018-04 (map-staking conversion); pre-2018 legacy claims sit in the separate
-administrative bundle. BC, YT and NU have no equivalent register at all, so their
-`tenure_events` genuinely begin with C3.1's first snapshot.
+**The real blind spot is temporal, and it is per-jurisdiction — see Master §6c.** Every
+digital tenure record begins at that jurisdiction's conversion from ground to map staking:
+QC 2000, BC 2005-01, NL 2005-02, NB 2010, SK 2012, NS 2013, **ON 2018-04**, NU 2021-01.
+Ontario's unbiased drop history therefore starts 2018-04; `MENDM_Legacy_Claims` extends
+*staking dates for survivors* back to 1980 but recovers no pre-2018 abandonment, so anything
+computed over that window carries `survivorship_biased = true`.
+
+**Yukon is the exception and it is already on disk.** It never converted, so its register was
+never truncated: `YT_HISTORICAL_CLAIMS` holds 244,703 tenures — 238,398 `Expired`, `OWNER_NAME`
+100% populated, `STAKING_DATE` to 1899 — harvested in June and unexamined until this audit.
+Use it as the **second** history for cross-validating heat and criticality code, since two
+independent registers catch bugs one cannot. MB and NT publish nothing comparable.
 
 ## Handoff notes for detailed planning
 

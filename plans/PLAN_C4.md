@@ -70,6 +70,17 @@ Sections (each independently regenerable; missing upstream data renders an expli
   buyer capacity assessment, recommendation, valuation internals) and keeps land,
   geology, drilling, history — the buyer-facing package. Licence attribution lines from
   `_source.json` sidecars are auto-inserted (SK requires layer+date citation).
+
+  > **Licence gate (audit H).** Ontario's MLAS tenure ships under MNDM Electronic Information
+  > Products terms, not an open licence. Commercial distribution, "creation of value-added
+  > products", and reproduction of maps or figures each require **prior written permission from
+  > MNDM** — and the sales render is all three at once. Until permission is granted, the sales
+  > profile must emit **derived figures we generate, not reproduced MNDM cartography**, plus a
+  > Crown-copyright attribution block. Add a render-time assertion keyed off a per-source
+  > `redistribution` field in `_source.json` (`open` / `permission_required` / `granted`) so a
+  > restricted source cannot silently reach a buyer-facing document; the field defaults to
+  > `permission_required` for anything not explicitly cleared. The internal profile is
+  > unrestricted.
 - Storage: `dossiers/<target_id>/<version>/{dossier.json, dossier.html, dossier.pdf}`.
 
 **Acceptance:** one end-to-end dossier for a real Ontario open-ground target adjacent to

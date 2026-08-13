@@ -41,6 +41,45 @@ def last_known(con, resource_id):
     return row if row else None
 
 
+#: Longest real extension we expect is "geojson" (7).
+_MAX_EXT_LEN = 8
+
+
+def needs_extension(name: str, fmt: str) -> bool:
+    """True when `name` has no usable file extension for `fmt`.
+
+    Resource names are frequently coordinates — `-95_53_-94.5_53.5` — for which
+    `Path.suffix` returns junk like `.5` or `.5_-93_54`. Only a short, purely
+    alphabetic suffix counts as a real extension, so those names get one appended
+    instead of being written without any.
+    """
+    if not fmt:
+        return False
+    suffix = Path(name).suffix.lstrip(".")
+    return not (suffix.isalpha() and len(suffix) <= _MAX_EXT_LEN)
+
+
+def sniff_container(path) -> str | None:
+    """Identify a file by its leading bytes, ignoring whatever it is named.
+
+    Returns "zip", "html", "sqlite" or None. Registry/CKAN `format` fields lie —
+    Québec serves ZIPs labelled `.gpkg`, and failed downloads arrive as HTML
+    error pages with a `.zip` name.
+    """
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(512)
+    except OSError:
+        return None
+    if head[:4] in (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"):
+        return "zip"
+    if head[:16] == b"SQLite format 3\x00":
+        return "sqlite"
+    if head.lstrip()[:14].lower().startswith((b"<!doctype html", b"<html")):
+        return "html"
+    return None
+
+
 def stream_download(url, dest):
     dest.parent.mkdir(parents=True, exist_ok=True)
     h = hashlib.sha256(); n = 0
@@ -85,51 +124,76 @@ def main():
             continue
 
         fname = (r["resource_name"] or r["resource_id"] or "data").replace("/", "_")
-        raw = Path(fname)
-        if fmt and not raw.suffix or (raw.suffix and "_" in raw.suffix):
+        fname = C.safe_filename(fname)
+        if needs_extension(fname, fmt):
             fname += f".{fmt}"
         dest = C.RAW_DIR / r["jurisdiction"] / r["code"] / today / fname
+        # Stage every download beside its destination. Nothing is written to
+        # `dest` until the content is known-good and known-wanted, so a skip or a
+        # failure can never delete a file the manifest already points at.
+        tmp = dest.with_name(dest.name + ".part")
+        dest.parent.mkdir(parents=True, exist_ok=True)
 
         try:
             if r["connector"] == "arcgis_layer":
-                cnt = arcgis.fetch_layer_paged(r["url"], dest)
-                sha = hashlib.sha256(dest.read_bytes()).hexdigest()
-                size = dest.stat().st_size
+                cnt = arcgis.fetch_layer_paged(r["url"], tmp)
+                sha = hashlib.sha256(tmp.read_bytes()).hexdigest()
+                size = tmp.stat().st_size
                 extra = f" ({cnt} features)"
             elif r["connector"] == "wfs_layer":
                 cnt = wfs.fetch_paged(
                     r["url"], r.get("type_name", ""),
-                    r.get("sort_by", "OBJECTID"), dest,
+                    r.get("sort_by", "OBJECTID"), tmp,
                     page_size=r.get("page_size", 10000),
                 )
-                sha = hashlib.sha256(dest.read_bytes()).hexdigest()
-                size = dest.stat().st_size
+                sha = hashlib.sha256(tmp.read_bytes()).hexdigest()
+                size = tmp.stat().st_size
                 extra = f" ({cnt} features)"
             elif r["connector"] == "es_scroll":
                 result = es_scroll.fetch_scroll(
                     endpoint=r["url"],
                     index=r["_es_index"],
                     api_key=r.get("_es_api_key", ""),
-                    dest=dest,
+                    dest=tmp,
                     page_size=r.get("_es_page_size", 1000),
                     query=r.get("_es_query", {"match_all": {}}),
                 )
-                sha = hashlib.sha256(dest.read_bytes()).hexdigest()
-                size = dest.stat().st_size
+                sha = hashlib.sha256(tmp.read_bytes()).hexdigest()
+                size = tmp.stat().st_size
                 extra = f" ({result['fetched']} records)"
             else:
-                sha, size = stream_download(r["url"], dest)
+                sha, size = stream_download(r["url"], tmp)
                 extra = ""
         except Exception as e:                                  # noqa: BLE001
+            tmp.unlink(missing_ok=True)
             print(f"  ! FAIL {r['jurisdiction']}/{r['code']} {fname}: {e}", file=sys.stderr)
             failed += 1
             continue
 
+        # Reject HTML served in place of the binary the registry promised. This is
+        # how the FED geophysics and ON bedrock "downloads" became error pages.
+        sniffed = sniff_container(tmp)
+        if sniffed == "html" and fmt not in ("html", "htm"):
+            tmp.unlink(missing_ok=True)
+            print(f"  ! REJECT {r['jurisdiction']}/{r['code']} {fname}: "
+                  f"server returned HTML, registry says {fmt}", file=sys.stderr)
+            failed += 1
+            continue
+
         if prev and prev[0] == sha and not args.force:
-            dest.unlink(missing_ok=True)
+            # Content unchanged since the last harvest: drop the staged copy and
+            # leave whatever the manifest already references untouched.
+            tmp.unlink(missing_ok=True)
             skipped += 1
             continue
 
+        if sniffed and fmt and sniffed != fmt:
+            # The registry's declared format disagrees with the bytes on the wire
+            # (QC ships ZIPs named .gpkg/.shp/.fgdb). Record the truth; process.py
+            # sniffs content too, so the file stays readable either way.
+            r = {**r, "sniffed_format": sniffed}
+
+        tmp.replace(dest)
         (dest.parent / "_source.json").write_text(json.dumps(r, indent=2), encoding="utf-8")
         con.execute("INSERT OR REPLACE INTO harvest VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (r["resource_id"] or r["url"], r["jurisdiction"], r["code"],

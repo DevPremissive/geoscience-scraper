@@ -613,6 +613,54 @@ jurisdiction would publish reopening ground as a layer.
 
 ---
 
+## H. The Ontario tenure licence is not open — and the dossier is the thing it restricts (2026-08-13)
+
+C0.9 left one task: read the Terms of Use bundled with the MLAS download before any dossier
+carrying that data leaves the machine. Done. It is the **MNDM Electronic Information Products**
+agreement, not the Open Government Licence, and it is restrictive in exactly the direction this
+business points.
+
+Verbatim from `_Terms of Use.htm` in `mlas_operational_gis_data.zip`:
+
+> "Noncommercial use of unsubstantial excerpts of the Content is permitted provided that
+> appropriate credit is given and Crown copyright is acknowledged. **Any substantial
+> reproduction of the Content or any commercial use of all or part of the Content is prohibited
+> without the prior written permission of MNDM.** Substantial reproduction includes the
+> reproduction of any illustration or figure, such as, but not limited to graphs, charts and
+> **maps**. **Commercial use includes commercial distribution of the Content**, the reproduction
+> of multiple copies of the Content for any purpose whether or not commercial, use of the
+> Content in commercial publications, and **the creation of value-added products using the
+> Content**."
+
+**What this does and does not block.**
+
+| Activity | Status |
+|---|---|
+| Harvesting, storing, querying, modelling on this machine | Fine — no reproduction or distribution |
+| Internal dossiers used to make a staking decision | Fine — internal, non-distributed |
+| **Dossier sent to a prospective buyer as a sales package** | **Requires prior written permission.** It is commercial distribution, it is a value-added product, and C4.1 renders maps — all three triggers |
+| Published maps, marketing material, a public viewer | Same — permission first |
+
+Master §1 defines the dossier as "the internal decision document and, later, **the majority of
+the sales package handed to a buyer**." That terminal work product is precisely what the licence
+reserves. This is not a blocker on building the system; it is a **lead-time item on the business
+model**, and it should be started early because permission correspondence is slow and the answer
+shapes what C4.1's sales render may contain.
+
+**Action:** request written permission for commercial use and redistribution of MLAS tenure
+content in client-facing property packages. Contacts given in the terms — MNDM Publication
+Services `Pubsales.ndm@ontario.ca` (705-670-5691 / 1-888-415-9845 ext. 5691) and Crown Copyright
+`Copyright@gov.on.ca` (416-326-2678). Worth asking in the same letter whether the tenure layers
+are separately available under the Open Government Licence – Ontario, since many provincial
+datasets are and that would remove the question entirely.
+
+Until answered, C4.1's `render(profile="sales")` should carry an attribution block and the
+**geometry-only** posture: derived analysis and our own figures, not reproduced MNDM maps. The
+same question applies to every other jurisdiction's terms as they are registered — Saskatchewan
+already requires layer+date citation, which the plans note.
+
+---
+
 ## Change log
 
 - **2026-08-13** — initial audit; all findings above recorded after a second challenge pass. Six first-pass conclusions were corrected: B1 strengthened, B2 reframed, B4/D3/D5-Chroma downgraded, A2 qualified.

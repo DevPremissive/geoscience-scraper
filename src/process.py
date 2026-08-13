@@ -29,24 +29,105 @@ def latest(code_dir):
     return max(snaps, default=None, key=lambda p: p.name) if snaps else None
 
 
+# ZIP-based formats the loaders below read directly. Extracting these breaks them.
+ZIP_NATIVE = {".kmz", ".xlsx", ".xls", ".docx", ".qgz"}
+
+
+#: Archives can nest — NS wraps a self-extracting .exe inside a ZIP named .gdb.
+MAX_EXPAND_PASSES = 4
+
+
+def is_zip(path) -> bool:
+    """Detect a ZIP by content rather than by name.
+
+    Checks the local-header magic first, then falls back to a central-directory
+    scan, which is what recognises self-extracting archives: Nova Scotia's mineral
+    rights download is a ZIP named `.gdb` containing a Windows SFX `.exe` whose
+    first bytes are `MZ`, with the real shapefiles inside that.
+    """
+    try:
+        with open(path, "rb") as fh:
+            if fh.read(4) in (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"):
+                return True
+    except OSError:
+        return False
+    try:
+        return zipfile.is_zipfile(path)
+    except OSError:
+        return False
+
+
 def expand(snapshot, work):
+    """Copy a snapshot aside and unpack every archive in it, whatever it is named.
+
+    Sniffs content, not extension. Québec ships ZIPs named .gpkg/.shp/.fgdb and
+    Nova Scotia one named .gdb — 46 archives across four provinces that the old
+    `rglob("*.zip")` never saw, which is why QC, BC bedrock and all of NS were
+    absent from geo.gpkg. GDAL dispatches on extension, so these must be unpacked
+    here or they stay unreadable downstream.
+    """
     shutil.copytree(snapshot, work, dirs_exist_ok=True)
-    for z in list(work.rglob("*.zip")):
-        try:
-            with zipfile.ZipFile(z) as zf:
-                zf.extractall(z.parent / z.stem)
-                z.unlink()
-        except zipfile.BadZipFile:
-            print(f"  ! bad zip {z.name}", file=sys.stderr)
-    for f in list(work.rglob("*")):
-        if f.is_file() and f.suffix == "" and f.stat().st_size > 0:
-            try:
-                with zipfile.ZipFile(f) as zf:
-                    if any(n.endswith(".kml") for n in zf.namelist()):
-                        f.rename(f.with_suffix(".kmz"))
-            except (zipfile.BadZipFile, IsADirectoryError):
-                pass
+    for _ in range(MAX_EXPAND_PASSES):
+        if not _expand_pass(work):
+            break
     return work
+
+
+def _expand_pass(work) -> bool:
+    """Unpack every archive found in one sweep. Returns True if anything changed."""
+    changed = False
+    for f in sorted(work.rglob("*")):
+        if not f.is_file() or f.name == "_source.json":
+            continue
+        try:
+            if f.stat().st_size == 0 or f.suffix.lower() in ZIP_NATIVE or not is_zip(f):
+                continue
+        except OSError:
+            continue
+        try:
+            with zipfile.ZipFile(f) as zf:
+                names = zf.namelist()
+                # A KMZ under some other name: keep it whole, just label it.
+                # Append rather than replace — these names are often coordinates
+                # ("-95_53_-94.5_53.5") where with_suffix() would eat a digit.
+                if names and all(n.lower().endswith((".kml", "/")) for n in names):
+                    f.rename(f.with_name(f.name + ".kmz"))
+                    changed = True
+                    continue
+                zf.extractall(f.parent / (f.stem or f.name))
+            f.unlink()
+            changed = True
+        except zipfile.BadZipFile:
+            print(f"  ! bad zip {f.name}", file=sys.stderr)
+        except OSError as e:
+            print(f"  ! cannot expand {f.name}: {e}", file=sys.stderr)
+    return changed
+
+
+#: Formats that can hold more than one layer in a single file.
+MULTILAYER = {".gpkg", ".gdb", ".fgdb", ".kml", ".kmz"}
+
+
+def _sublayers(path) -> list:
+    """Layer names inside `path`, or `[None]` for single-layer formats.
+
+    `gpd.read_file()` returns only the first layer of a container without a
+    `layer=` argument, which silently discarded 27 of the 28 layers in Québec's
+    sigeom.gpkg.
+    """
+    if path.suffix.lower() not in MULTILAYER:
+        return [None]
+    try:
+        import pyogrio
+        names = [l[0] for l in pyogrio.list_layers(str(path))]
+    except Exception:                                           # noqa: BLE001
+        return [None]
+    return names if len(names) > 1 else [None]
+
+
+def lname_clean(name: str) -> str:
+    """Normalise a layer name for GPKG: no spaces or hyphens, length-capped."""
+    return name.replace(" ", "_").replace("-", "_")[:62]
 
 
 def process_one(juris, code, snapshot):
@@ -54,33 +135,49 @@ def process_one(juris, code, snapshot):
     with tempfile.TemporaryDirectory() as td:
         work = expand(snapshot, Path(td) / "w")
         PRIORITY = [".geojson", ".json", ".gpkg", ".shp", ".kml", ".kmz", ".gpx"]
-        best_frames: list = []
+        # (frame, source_stem) for everything readable at the winning priority.
+        loaded: list = []
         for ext in PRIORITY:
             candidates = [p for p in work.rglob(f"*{ext}") if p.name != "_source.json"]
             if not candidates:
                 continue
-            frames: list = []
             for f in candidates:
-                try:
-                    g = gpd.read_file(f)
-                    if g.empty:
-                        continue
-                    if g.crs is None:
-                        g.set_crs(epsg=4326, inplace=True, allow_override=True)
-                    else:
-                        g = g.to_crs(epsg=4326)
-                    drop_cols = [c for c in g.columns if c.upper() in ("OBJECTID", "FID")]
-                    if drop_cols:
-                        g = g.drop(columns=drop_cols)
-                    frames.append(g)
-                except Exception as e:                          # noqa: BLE001
-                    print(f"   ! vec {f.name}: {e}", file=sys.stderr)
-            if frames:
-                best_frames = frames
+                # Containers hold many layers — gpd.read_file() would silently
+                # return only the first. QC's sigeom.gpkg carries 28.
+                for sub in _sublayers(f):
+                    try:
+                        g = gpd.read_file(f, layer=sub) if sub else gpd.read_file(f)
+                        if g.empty:
+                            continue
+                        if g.crs is None:
+                            g.set_crs(epsg=4326, inplace=True, allow_override=True)
+                        else:
+                            g = g.to_crs(epsg=4326)
+                        drop_cols = [c for c in g.columns if c.upper() in ("OBJECTID", "FID")]
+                        if drop_cols:
+                            g = g.drop(columns=drop_cols)
+                        loaded.append((g, sub or f.stem))
+                    except Exception as e:                      # noqa: BLE001
+                        print(f"   ! vec {f.name}[{sub or '-'}]: {e}", file=sys.stderr)
+            if loaded:
                 break
-        layer_name = f"{juris}__{code}".replace(" ", "_").replace("-", "_")[:62]
-        if best_frames:
-            merged = gpd.pd.concat(best_frames, ignore_index=True) if len(best_frames) > 1 else best_frames[0]
+
+        # Group by schema. Tiled sources (1,541 OGSEarth KMZ tiles) share one
+        # schema and must merge into a single layer; multi-dataset bundles (the
+        # MLAS ZIP holds cell claims, cancelled claims, alienations, tenure,
+        # plans & permits) have different schemas and must not be concatenated
+        # into a sparse union of everything.
+        groups: dict = {}
+        for g, stem in loaded:
+            key = tuple(sorted(c for c in g.columns if c != "geometry"))
+            groups.setdefault(key, []).append((g, stem))
+
+        base = f"{juris}__{code}".replace(" ", "_").replace("-", "_")
+        for frames in groups.values():
+            merged = (gpd.pd.concat([f for f, _ in frames], ignore_index=True)
+                      if len(frames) > 1 else frames[0][0])
+            name = base if len(groups) == 1 else f"{base}__{frames[0][1]}"
+            layer_name = lname_clean(name)
             merged.to_file(C.GPKG_PATH, layer=layer_name, driver="GPKG")
             print(f"   layer {layer_name:<48}{len(merged):>9}")
 

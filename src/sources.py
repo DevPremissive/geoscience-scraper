@@ -120,7 +120,43 @@ PROVINCES = {
                     "resource_name": "Ontario Borehole Database",
                     "size": 39238386,
                     "notes": "~39MB ZIP from files.ontario.ca. 126K+ percussion, overburden, sonic, diamond drill holes. "
-                             "This IS the Ontario Drill Hole Database content; the ODHD CKAN entry only has a KML preview.",
+                             "NOTE: mixes water wells and geotechnical holes with exploration holes — filter on hole "
+                             "type before deriving barren negatives. The OMEIS Drill Hole ArcGIS layer (172,259 holes "
+                             "with HOLE_TYPE and ELEMENTS) is the better source for exploration work.",
+                },
+                "ON_MLAS_TENURE": {
+                    "url": "https://www.geologyontario.mndm.gov.on.ca/mines/documents/claimaps/mlas_operational_gis_data.zip",
+                    "format": "zip",
+                    "resource_name": "MLAS Operational GIS Data",
+                    "size": 208080564,
+                    "notes": "AUTHORITATIVE Ontario tenure. ~208MB ZIP of ESRI shapefiles, regenerated daily, no key. "
+                             "Operational_Cell_Claims 401,594 (HOLDER, ISSUE_DATE, ANNIVERSAR, CLAIM_DUE_ all 100% "
+                             "populated, 1,403 holders); Cancelled_Claim_Polygons 431,557 (ISSUE_DATE + TERMINATIO from "
+                             "2018-04 = unbiased staked-and-dropped history); Mining_Land_Tenure 22,940 (EXPIRY_DAT); "
+                             "Non_Mining_Land_Tenure 193,757; Operational_Alienations 16,812; Plans_Permits 799; "
+                             "MEM_Boundary_Claims 22,074 + 149,955 points. "
+                             "Supersedes the ogsearth KMZ superoverlay, which the province labels 'unofficial ... for "
+                             "viewing purposes only', carries no attributes and lists only 202,407 claims. "
+                             "HOLDER embeds ownership share as a '(NN) ' prefix — parse it out. "
+                             "Cancelled STATUS: only 'Cancelled' (303,138) are drops; 'Amalgamated' (102,966) and "
+                             "'Merged' (2,379) are administrative. "
+                             "LICENCE: bundled MNDM Electronic Information Products terms are NOT open — commercial use "
+                             "and substantial reproduction (explicitly including maps and figures) require prior written "
+                             "permission from MNDM. See _Terms of Use.htm in the archive.",
+                },
+                "ON_MLAS_ADMIN": {
+                    "url": "https://www.geologyontario.mndm.gov.on.ca/mines/documents/claimaps/endm_administrative_gis_data.zip",
+                    "format": "zip",
+                    "resource_name": "MENDM Administrative GIS Data",
+                    "size": 639596909,
+                    "notes": "~640MB ZIP, static since 2021-06. MENDM_Legacy_Claims 33,439 — the claims live at the "
+                             "2018-04-10 map-staking conversion, with DATE_COM back to 1980 (1980s 6,086 / 1990s 2,433 / "
+                             "2000s 10,641 / 2010s 14,279). Every row is STATUS='Active' and only 1,175 carry DATE_CNCL: "
+                             "it is the SURVIVORS at conversion, so it extends the staking-date record but recovers no "
+                             "pre-2018 abandonment — flag anything derived from it survivorship_biased. No owner field. "
+                             "Also carries the 5.2M-cell provincial tenure grid (north/south), mining divisions, "
+                             "exploration regions, lots and concessions, and the provincial boundary. "
+                             "Same MNDM licence terms as ON_MLAS_TENURE.",
                 },
             },
             "notes": "ONTARIO DIRECT — Azure blob URLs discovered via GeoHub Angular app API key in main.js. "

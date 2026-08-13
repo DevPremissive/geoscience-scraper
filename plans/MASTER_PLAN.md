@@ -359,6 +359,15 @@ maturity; remaining jurisdictions.
   business depends on. The moat is real but its clock starts the day C3.1 runs, which is
   why C3.1 is now Phase 0. Treat any pre-archive staking series as descriptive and label it
   survivorship-biased wherever it appears.
+- **The Ontario tenure licence restricts the sales package, not the analysis.** (Audit H.)
+  The MLAS bundle ships under MNDM Electronic Information Products terms, not an open licence:
+  commercial distribution, creation of value-added products, and reproduction of maps or figures
+  all require **prior written permission from MNDM**. Internal harvesting, modelling and
+  decision-making are unaffected; the buyer-facing dossier — §1's terminal work product — is
+  exactly what is reserved. Start the permission request early (`Pubsales.ndm@ontario.ca`,
+  `Copyright@gov.on.ca`) and ask in the same letter whether an Open Government Licence – Ontario
+  version exists. Until answered, the sales render carries attribution and our own derived
+  figures rather than reproduced MNDM maps.
 - **Verify the product, not just the portal.** (Audit A2 → F.) For half a day this plan
   recorded "Ontario publishes no ownership or expiry" as a standing risk and moved Phase 1 to
   BC because of it. The finding was rigorous about the OGSEarth KMZ — checked to the raw tile

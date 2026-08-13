@@ -31,7 +31,13 @@ pystac-client 0.9.0.
 > and ledger rows intact. So the connectors are not the primary problem; persistence is.
 > Do not spend time debugging Elasticsearch pagination.
 
-**First — fix the defect that can destroy a snapshot (do this before any re-harvest).**
+> **DONE 2026-08-13** — the four items below marked ✅ are implemented, tested and committed
+> on `claude/c0-repairs`: the staging fix, the naming/precedence fix, HTML rejection,
+> `process.py` content sniffing (which also unblocked QC, BC bedrock and NS), multi-layer and
+> multi-dataset handling, and the MLAS registration. What remains in 0.1 is the **re-harvest**
+> itself and the ledger reconciliation.
+
+**✅ First — fix the defect that can destroy a snapshot (do this before any re-harvest).**
 
 `harvest.py:128-131` deletes the file in the *current* snapshot directory when a re-run's
 sha matches the previous ledger row, then `continue`s without touching that row:
@@ -49,8 +55,8 @@ Ontario-only — consistent with `harvest.py --jurisdiction ON`. Fix: skip *with
 when the destination is inside the snapshot the ledger already references, or write to a
 `.part` file and only promote on success.
 
-**Second — register the MLAS operational bulk shapefiles as Ontario's authoritative tenure
-source (audit F).** This is the single highest-value item in C0 and it is a registry entry,
+**✅ Second — register the MLAS operational bulk shapefiles as Ontario's authoritative tenure
+source (audit F).** *Registered as `ON_MLAS_TENURE` + `ON_MLAS_ADMIN` in `sources.py`.* This is the single highest-value item in C0 and it is a registry entry,
 not an engineering task.
 
 ```
@@ -86,7 +92,7 @@ Processing notes that are not optional:
 - Keep the OGSEarth KMZ registered as a fallback only.
 
 **Third — re-point Ontario geoscience at public ArcGIS REST instead of the
-Azure-blob/Elasticsearch paths.** This is cheaper, keyless and uses code that already exists (`arcgis.py:5` documents
+Azure-blob/Elasticsearch paths.** *(not yet done)* This is cheaper, keyless and uses code that already exists (`arcgis.py:5` documents
 FeatureServer/**MapServer** paging with `f=geojson`; live request verified; both layers
 report `maxRecordCount` 2000 with `supportsPagination: true`, matching `C.ARCGIS_PAGE`).
 Adding them is a `sources.py` dict entry — **no new code**.

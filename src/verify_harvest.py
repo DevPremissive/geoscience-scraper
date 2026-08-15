@@ -9,8 +9,10 @@ Two independent checks, both safe to run at any time:
              exists. Rows whose payload sits at a near-miss path (the ogsearth
              tiles, whose ledger paths lack the `.kmz` the files carry) are
              repaired *from disk* — the candidate's sha256 must match the row
-             before anything is rewritten. Rows whose payload is genuinely gone
-             are reported as orphans for re-harvest.
+             before anything is rewritten. Rows whose payload is gone are split
+             into ORPHAN (no copy of this resource is held — re-fetch it) and
+             SUPERSEDED (a newer row for the same resource does have a payload,
+             so only that dated snapshot was lost and no re-fetch can undo it).
 
   verify     Sniff the leading bytes of every payload and compare against the
              registry's declared `format`. HTML served in place of a binary is
@@ -46,7 +48,8 @@ _UNSNIFFABLE = {"csv", "tsv", "json", "jsonl", "geojson", "kml", "gpx", "tif",
 
 
 def _rows(con, only_j=None, only_c=None):
-    sql = "SELECT rowid, jurisdiction, code, connector, format, sha256, size_bytes, local_path, snapshot_date FROM harvest"
+    sql = ("SELECT rowid, jurisdiction, code, connector, format, sha256, size_bytes, "
+           "local_path, snapshot_date, resource_id FROM harvest")
     for r in con.execute(sql):
         if only_j and r[1] not in only_j:
             continue
@@ -77,19 +80,43 @@ def _candidates(local_path: str, fmt: str):
         yield p.with_suffix("")
 
 
+def _live_resources(con) -> set:
+    """resource_ids that have at least one row whose payload is on disk."""
+    live = set()
+    for rid, lp in con.execute("SELECT resource_id, local_path FROM harvest"):
+        if rid not in live and lp and Path(lp).exists():
+            live.add(rid)
+    return live
+
+
 def reconcile(con, fix=False, only_j=None, only_c=None):
-    """Point every ledger row at the file it describes, or report it orphaned."""
+    """Point every ledger row at the file it describes, or report it orphaned.
+
+    Orphans are split in two, because the difference decides whether anyone
+    needs to act:
+
+      ORPHAN      no row for this resource has a payload on disk — the data is
+                  genuinely absent and needs re-fetching.
+      SUPERSEDED  this row's payload is gone, but a newer row for the same
+                  resource does have one. That is the ordinary shape of a
+                  destroyed historical snapshot whose source has since been
+                  re-harvested with different content: the *data* is held, that
+                  particular dated snapshot is not, and no re-fetch can bring
+                  it back. Reporting these as orphans forever would train the
+                  reader to ignore the check.
+    """
     ok = repaired = 0
     fixable, orphans = [], []
+    live = _live_resources(con)
 
-    for rowid, juris, code, conn, fmt, sha, size, lp, snap in _rows(con, only_j, only_c):
+    for rowid, juris, code, conn, fmt, sha, size, lp, snap, rid in _rows(con, only_j, only_c):
         found = None
         for cand in _candidates(lp, fmt):
             if cand.exists() and cand.is_file():
                 found = cand
                 break
         if found is None:
-            orphans.append((juris, code, conn, snap, size or 0, lp))
+            orphans.append((juris, code, conn, snap, size or 0, lp, rid in live))
             continue
         if str(found) == lp:
             ok += 1
@@ -97,7 +124,7 @@ def reconcile(con, fix=False, only_j=None, only_c=None):
         # A different path than the ledger records. Confirm it is the same
         # payload before rewriting — size first, it is free.
         if found.stat().st_size != size or _sha256(found) != sha:
-            orphans.append((juris, code, conn, snap, size or 0, lp))
+            orphans.append((juris, code, conn, snap, size or 0, lp, rid in live))
             continue
         fixable.append((rowid, lp, str(found)))
 
@@ -111,14 +138,17 @@ def reconcile(con, fix=False, only_j=None, only_c=None):
     print(f"  rows on disk at recorded path : {ok}")
     print(f"  rows repairable from disk     : {len(fixable)}"
           + (f"  → {repaired} rewritten" if fix else "  (re-run with --fix)"))
-    print(f"  orphaned rows (payload gone)  : {len(orphans)}")
+    true_orphans = [o for o in orphans if not o[6]]
+    superseded   = [o for o in orphans if o[6]]
+    print(f"  orphaned rows (need re-fetch) : {len(true_orphans)}")
+    print(f"  superseded snapshots          : {len(superseded)}   (payload gone, newer copy held)")
     if fixable and not fix:
         by_code = Counter(Path(old).parent.parent.name for _rid, old, _new in fixable)
         for code, n in by_code.most_common():
             print(f"    {n:>6} in {code}")
-    for juris, code, conn, snap, size, lp in sorted(orphans, key=lambda r: -r[4]):
-        print(f"    ORPHAN {juris:<4}{code:<20}{conn:<10}{snap}  {size/1e6:8.1f}MB  {lp}")
-    return len(orphans)
+    for juris, code, conn, snap, size, lp, sup in sorted(orphans, key=lambda r: -r[4]):
+        print(f"    {'SUPERSEDED' if sup else 'ORPHAN':<11}{juris:<4}{code:<20}{conn:<10}{snap}  {size/1e6:8.1f}MB")
+    return len(true_orphans)
 
 
 def _zip_complete(path) -> bool:
@@ -139,7 +169,7 @@ def verify(con, only_j=None, only_c=None):
     checked = html = mismatch = absent = truncated = 0
     problems = []
 
-    for _rowid, juris, code, conn, fmt, _sha, _size, lp, snap in _rows(con, only_j, only_c):
+    for _rowid, juris, code, conn, fmt, _sha, _size, lp, snap, _rid in _rows(con, only_j, only_c):
         p = Path(lp)
         if not p.exists():
             absent += 1

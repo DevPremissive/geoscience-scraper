@@ -9,7 +9,7 @@ dataset code, and write flat tables to processed/tables/.
 Requires: geopandas, pyogrio, pandas, openpyxl, pyarrow.
 """
 from __future__ import annotations
-import json, sys, zipfile, tempfile, shutil
+import argparse, json, sys, zipfile, tempfile, shutil
 from pathlib import Path
 
 import config as C
@@ -282,13 +282,29 @@ def lname(juris: str, code: str, path: Path) -> str:
 
 
 def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--jurisdiction", nargs="*", default=None)
+    ap.add_argument("--only", nargs="*", default=None,
+                    help="dataset codes, e.g. --only ON_MLAS_TENURE")
+    args = ap.parse_args()
+    only_j = {j.upper() for j in args.jurisdiction} if args.jurisdiction else None
+    only_c = {c.upper() for c in args.only} if args.only else None
+
     C.ensure_dirs()
-    if C.GPKG_PATH.exists():
+    # A full run rebuilds the GeoPackage from scratch. A filtered run must not:
+    # writing a layer that already exists replaces just that layer and leaves
+    # its siblings intact, so a jurisdiction can be reprocessed on its own
+    # without re-expanding the ~8 GB of Québec archives every time.
+    if C.GPKG_PATH.exists() and not (only_j or only_c):
         C.GPKG_PATH.unlink()
     if not C.RAW_DIR.exists():
         sys.exit("No raw/ yet. Run harvest.py first.")
     for jdir in sorted(p for p in C.RAW_DIR.iterdir() if p.is_dir()):
+        if only_j and jdir.name.upper() not in only_j:
+            continue
         for cdir in sorted(p for p in jdir.iterdir() if p.is_dir()):
+            if only_c and cdir.name.upper() not in only_c:
+                continue
             snap = latest(cdir)
             if snap:
                 process_one(jdir.name, cdir.name, snap)

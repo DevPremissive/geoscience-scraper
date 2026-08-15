@@ -813,6 +813,40 @@ The extra file is `QC_SIGEOM_EXAMINE/… Document Examine - Jeux de données gé
 pipeline. The corrected count is self-consistent with the audit's own verified "QC SIGÉOM 13
 packages": there are exactly 13 `.fgdb`, one per package.
 
+### I8 — C0.2 acceptance evidence: all 47 containers load
+
+Every misnamed container was expanded and read back. **22 source codes, 47 containers,
+zero unexplained.** Feature totals are the sum of all layers found at the winning priority,
+so they count downhole interval rows as well as collars.
+
+| Source | Via | Features | Source | Via | Features |
+|---|---|---:|---|---|---:|
+| QC_SIGEOM_GEOCHEM | .gpkg | 45,088,611 | QC_SIGEOM_IGC | .gpkg | 583,690 |
+| QC_SIGEOM_BEDROCK | .gpkg | 6,788,120 | QC_SIGEOM_GEOPHYS | .shp | 324,793 |
+| QC_SIGEOM_QUATERNARY | .gpkg | 1,730,157 | QC_SIGEOM_GRANULATS | .gpkg | 105,255 |
+| QC_SIGEOM_DRILLHOLES | .gpkg | 1,690,542 | QC_SIGEOM_MINPOT | .gpkg | 103,645 |
+| QC_SIGEOM_EXAMINE | .gpkg | 941,159 | QC_SIGEOM_TOURBE | .gpkg | 82,656 |
+| QC_SIGEOM_MINES | .gpkg | 31,364 | QC_SIGEOM_GEOCHRON | .gpkg | 24,464 |
+| QC_SIGEOM_TRAVAUX | .gpkg | 16,064 | **BC_GEOL** | .shp | **33,409** |
+| NB_MPS | .geojson | 27,555 | NB_DRILLHOLE | .geojson | 17,887 |
+| NB_REPORTS_OF_WORK | .geojson | 9,684 | NB_EXPLORATION_TRENCHES | .geojson | 3,866 |
+| NB_MINERAL_OCCURRENCE | .geojson | 1,611 | NB_MINERAL_CLAIMS | .geojson | 86 |
+| NS_MINERAL_RIGHTS_GDB | .gdb | 2,227 | NS_MINERAL_RIGHTS_SHP | .shp | 2,227 |
+
+Notes that matter for reading the table:
+
+- **QC's three-format packaging.** Each SIGÉOM code ships the same data three times —
+  `.gpkg`, `.shp` and `.fgdb`, all ZIPs. `.gpkg` wins on priority, so the `.fgdb` and `.shp`
+  copies are never read. That is why QC loaded at all before the `.gdb` fix (I2's sibling):
+  it was never depending on geodatabase support. **Nothing else in the lake had that luck.**
+- **NS is 2,227, not 4,454.** Both NS codes hold the layer twice; the raw per-layer sum
+  double-counts and `process_one`'s exact-duplicate drop resolves it. The two NS codes are
+  themselves the same dataset in two formats — a registry-level duplication, not a bug.
+- **QC drillhole collars are 187,321** (`F5E02_FORAGE_DIAMANT`), the audit's figure exactly.
+  The rest of that code's 1.69 M is downhole structure: 1,150,636 `UNITE_LITHOLOGIQUE`
+  intervals and 337,966 `SEQUENCE_MINERALISATION` rows — the interval data C2.4 needs.
+- **BC bedrock 33,409 polygons** — the Phase-1 dependency in gap #12/#14, confirmed readable.
+
 ---
 
 ## Change log

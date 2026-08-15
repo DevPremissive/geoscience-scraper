@@ -160,7 +160,16 @@ def _layer_has_geometry(path, layer) -> bool:
         import pyogrio
         info = pyogrio.read_info(str(path), layer=layer) if layer \
             else pyogrio.read_info(str(path))
-        return info.get("geometry_type") not in (None, "Unknown", "None")
+        gtype = info.get("geometry_type")
+        if gtype not in (None, "Unknown", "None"):
+            return True
+        # "Unknown" is not the same as "absent". KML/KMZ layers may hold mixed
+        # geometry types and report Unknown while being perfectly spatial —
+        # trusting the string alone sent all 1,514 OGSEarth tenure tiles to
+        # Parquet as one table per tile. Settle it against the data instead.
+        head = gpd.read_file(path, layer=layer, rows=1) if layer \
+            else gpd.read_file(path, rows=1)
+        return "geometry" in head.columns and bool(head.geometry.notna().any())
     except Exception:                                           # noqa: BLE001
         return True          # unreadable metadata: let the normal path try
 

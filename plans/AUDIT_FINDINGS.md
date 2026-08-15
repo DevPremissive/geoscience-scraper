@@ -972,6 +972,51 @@ lake; only a count reconciled against the publisher describes the world. `latest
 completeness check before C3.1 automates this — a partial snapshot currently outranks a
 complete one purely by being newer.
 
+### I13 — State of the lake at the end of the C0.1/0.2/0.3/0.10 execution pass
+
+Measured, not asserted. `verify_harvest.py` over the whole ledger:
+
+```
+rows on disk at recorded path : 3,292      (was 780 resolving of 1,804)
+orphaned rows (need re-fetch) : 0          (was 8)
+superseded snapshots          : 2          (ON_OAFD / ON_AMIS June exports, unrecoverable)
+HTML served as binary         : 3          (was 41)
+truncated archives            : 0
+container/format disagreement : 0
+```
+
+`geo.gpkg`: **319 layers, was 77.**
+
+| Juris | before | after | note |
+|---|---:|---:|---|
+| QC | 0 | **174** | gap #12/#14 closed — drillholes 187,321, bedrock, quaternary, geochem |
+| ON | 5 | **69** | complete tenure, MLAS both bundles, OMEIS, surficial coverages |
+| NS | 0 | **2** | N2 — whole jurisdiction unblocked |
+| BC | 1 | **3** | bedrock 33,409, the Phase-1 dependency |
+| YT/NB/SK/NT_NU/US | 71 | 71 | unchanged |
+
+The three remaining HTML payloads are all in **superseded** June snapshots
+(`ON_GEOL_SURFICIAL`, `ON_GEOL_BEDROCK` at 2026-06-12, both since re-harvested correctly, plus
+one broken sibling resource inside an otherwise-good `BC_GEOCHEM` snapshot). They are retained
+under the immutable-dated-snapshot contract rather than deleted.
+
+**FED `GEOPHYSICS` is now `blocked: browser_automation`** and no longer matched. Its 38 payloads
+were 6,004-byte HTML pages recorded as successful ZIPs — the mechanism by which the geophysics
+modality read as populated while holding nothing. Payloads and ledger rows deleted, `_source.json`
+kept as the provenance record. Real acquisition is C3.2's browser work. Note this does **not**
+block Ontario, which has its own 246 MB of Geosoft gravity/magnetics (I5).
+
+**Not done, and why.** `QC_SIGEOM_GEOCHEM`'s *spatial* pass is still OOM-killed: `process_one`
+accumulates every frame for a source before grouping, and that source's wide sample layers
+exceed available RAM alongside the LLM. **No data is lost** — the 561,232 sediment and 582,192
+rock samples are in `geo.gpkg` via the shapefile path and all 11 tables are in Parquet — but a
+source that shipped *only* a wide GPKG would lose its spatial layers this way. The fix is to
+write frames incrementally instead of accumulating, using a content fingerprint for the
+duplicate check rather than holding frames for comparison. Sized at roughly half a day.
+
+Gate G0 items still open after this pass: 0.4 rasters, 0.5 fabric, 0.6 feature store,
+0.7 `tenure_events`, 0.8 `COVERAGE.md` rewrite, and C3.1/C3.6.
+
 ---
 
 ## Change log

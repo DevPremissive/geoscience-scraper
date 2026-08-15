@@ -37,17 +37,29 @@ FEDERAL = {
         "match": {
             "CGMC":        ["geological map compilation"],   # VERIFIED: bedrock, ML-ready rasters+gpkg
             "CDoGS":       ["geochemical surveys", "canadian database of geochemical"],
-            "GEOPHYSICS":  ["geophysical data repository", "aeromagnetic", "gravity",
-                            "radiometric"],
+            # GEOPHYSICS is deliberately NOT matched — see "blocked" below.
+        },
+        #: Codes discovered by `match` but known to be unfetchable through this
+        #: connector. Kept as a record so nobody re-adds them by reading the
+        #: catalogue and assuming a download exists.
+        "blocked": {
+            "GEOPHYSICS": "browser_automation",
         },
         "notes": "open.canada.ca is CKAN (GET-only). CGMC dataset id "
                  "d4f80bd3-17e3-a7e8-4bfe-d22a430678d5 ships GeoTIFF rasters + a GPKG "
                  "legend; large. CGMC 610MB GeoTIFF downloaded (2024_CGMC_Lithology_EPSG3978.tif). "
                  "CDoGS = 1300+ regional surveys. "
-                 "GEOPHYSICS match finds 5K+ individual aeromagnetic surveys + 4 national "
-                 "compilations (Mag 200m/1km, Grav 2km, Rad 250m). National grid FTP dirs "
-                 "(Compilations/National_Nationales/) exist but are EMPTY; actual data behind "
-                 "GDR web portal at geophysical-data.canada.ca (browser/JS needed for download). "
+                 "GEOPHYSICS is BLOCKED (browser_automation) and no longer matched. The CKAN "
+                 "records exist and resolve, but every 'download' URL returns a 6,004-byte HTML "
+                 "page: 38 of them were harvested on 2026-06-13 and recorded as successful ZIPs, "
+                 "which is what let the geophysics modality read as populated while holding "
+                 "nothing (audit B3). Those payloads have been deleted and their ledger rows "
+                 "removed. National grid FTP dirs (Compilations/National_Nationales/) exist but "
+                 "are EMPTY; the real data sits behind the GDR portal at "
+                 "geophysical-data.canada.ca and needs a browser — that is C3.2's job, using "
+                 "sedi-scraper/antibot.py. Do not re-enable the match hoping for a direct fetch. "
+                 "NOTE: Ontario provincial geophysics IS available and harvested — see ON_GEOPHYS "
+                 "(GDS1036, 246MB of Geosoft gravity/magnetics grids), so ON is not blocked on this. "
                  "CGMC GeoTIFF downloaded as 'direct' source. "
                  "Federation means many provincial datasets are ALSO mirrored here under their "
                  "own orgs — a second-pass fq='keywords:geoscience' catches strays.",

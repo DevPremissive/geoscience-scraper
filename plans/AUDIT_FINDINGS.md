@@ -847,6 +847,35 @@ Notes that matter for reading the table:
   intervals and 337,966 `SEQUENCE_MINERALISATION` rows — the interval data C2.4 needs.
 - **BC bedrock 33,409 polygons** — the Phase-1 dependency in gap #12/#14, confirmed readable.
 
+### I9 — MLAS harvested and verified; finding F reproduces, with expected daily drift
+
+The bundle is now harvested rather than merely inspected. All eight shapefiles present,
+read straight from the archive via `/vsizip/`. Finding F reproduces on every axis; the small
+differences are the file regenerating daily, exactly as F recorded:
+
+| Layer | 2026-08-14 | audit F (08-13) |
+|---|---:|---:|
+| `Operational_Cell_Claims` | **401,704** | 401,594 |
+| `Cancelled_Claim_Polygons` | **431,584** | 431,557 |
+| `Non_Mining_Land_Tenure` | 193,755 | 193,757 |
+| `Mining_Land_Tenure` | 22,940 | 22,940 |
+| `Operational_Alienations` | 16,812 | 16,812 |
+| `Plans_Permits` | 800 | 799 |
+
+`HOLDER`, `ISSUE_DATE`, `ANNIVERSAR`, `CLAIM_DUE_` are each **100% populated on all 401,704
+rows**, with **1,403 distinct holders** — F's figure exactly. The top holders are unchanged:
+`(100) KENORLAND EXPLORATION LTD` 54,020 · `(100) Juno Corp.` 28,164 · `(100) Wyloo Ring of
+Fire Ltd.` 13,796 · `(100) AGNICO EAGLE MINES LIMITED` 8,912.
+
+**Gap #16 is now measured rather than asserted:** 401,704 real claims against the 202,407 the
+OGSEarth KMZ carries. The harvested product was missing **half the province** and all of its
+ownership and expiry.
+
+Two carry-forwards. The `(NN)` share prefix on `HOLDER` still needs parsing into
+`owner_name` + `percent` — that is a derived transformation and belongs with C0.7 /C1.4, not
+with `process.py`'s raw lift. And `STATUS` on the cancelled register must be split before any
+row is treated as a drop (F2's caveat), which is likewise C0.7's job.
+
 ---
 
 ## Change log

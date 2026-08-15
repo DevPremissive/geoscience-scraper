@@ -36,9 +36,21 @@ def init_manifest():
 
 
 def last_known(con, resource_id):
-    row = con.execute("SELECT sha256, ckan_modified FROM harvest WHERE resource_id=? "
-                      "ORDER BY fetched_at DESC LIMIT 1", (resource_id,)).fetchone()
+    row = con.execute("SELECT sha256, ckan_modified, local_path FROM harvest "
+                      "WHERE resource_id=? ORDER BY fetched_at DESC LIMIT 1",
+                      (resource_id,)).fetchone()
     return row if row else None
+
+
+def payload_present(prev) -> bool:
+    """True when the file a ledger row references is actually on disk.
+
+    Every "unchanged, skip it" decision is conditional on this. A row whose
+    payload has gone missing is not evidence that we hold the data — it is
+    precisely the state the eight lost Ontario downloads left behind, and
+    skipping on it would refuse to re-fetch the very files we came for.
+    """
+    return bool(prev) and bool(prev[2]) and Path(prev[2]).exists()
 
 
 #: Longest real extension we expect is "geojson" (7).
@@ -119,7 +131,9 @@ def main():
             continue
 
         prev = last_known(con, r["resource_id"] or r["url"])
-        if prev and not args.force and prev[1] and prev[1] == (r.get("last_modified") or ""):
+        if (prev and not args.force and prev[1]
+                and prev[1] == (r.get("last_modified") or "")
+                and payload_present(prev)):
             skipped += 1
             continue
 
@@ -180,12 +194,17 @@ def main():
             failed += 1
             continue
 
-        if prev and prev[0] == sha and not args.force:
-            # Content unchanged since the last harvest: drop the staged copy and
-            # leave whatever the manifest already references untouched.
+        if prev and prev[0] == sha and not args.force and payload_present(prev):
+            # Content unchanged since the last harvest AND we still hold the file:
+            # drop the staged copy, leave what the manifest references untouched.
             tmp.unlink(missing_ok=True)
             skipped += 1
             continue
+        if prev and prev[0] == sha and not payload_present(prev):
+            # Same bytes, but the payload the ledger points at is gone. Promote
+            # the staged copy into today's snapshot and heal the row onto it.
+            print(f"  ~ RECOVER {r['jurisdiction']}/{r['code']}: re-fetched "
+                  f"{size/1e6:.1f}MB for an orphaned ledger row", file=sys.stderr)
 
         if sniffed and fmt and sniffed != fmt:
             # The registry's declared format disagrees with the bytes on the wire

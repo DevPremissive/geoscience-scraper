@@ -107,15 +107,32 @@ def _expand_pass(work) -> bool:
 #: Formats that can hold more than one layer in a single file.
 MULTILAYER = {".gpkg", ".gdb", ".fgdb", ".kml", ".kmz"}
 
+#: Sentinel standing for an ESRI ArcInfo binary coverage in PRIORITY. A coverage
+#: is a *directory* of .adf files with no distinguishing name, so it cannot be
+#: globbed by extension like every other format here.
+COVERAGE = "<arcinfo-coverage>"
+
+
+def is_coverage(path) -> bool:
+    """True for an ArcInfo coverage directory (GDAL's AVCBin driver reads it).
+
+    Ontario's MRD128 surficial geology ships this way: 115,526 polygons with
+    MATERIAL_DESCRIP and GEOLOGIC_DEPOSIT text, in `Data/coverages/sgu_poly/`.
+    Nothing in the extension-driven search below can see it, so a 503 MB
+    download produced zero layers and looked like an empty dataset.
+    """
+    return path.is_dir() and any(path.glob("*.adf"))
+
 
 def _sublayers(path) -> list:
     """Layer names inside `path`, or `[None]` for single-layer formats.
 
     `gpd.read_file()` returns only the first layer of a container without a
     `layer=` argument, which silently discarded 27 of the 28 layers in Québec's
-    sigeom.gpkg.
+    sigeom.gpkg — and, in a coverage, would return the ARC topology primitive
+    instead of the PAL polygons anyone actually wants.
     """
-    if path.suffix.lower() not in MULTILAYER:
+    if path.suffix.lower() not in MULTILAYER and not is_coverage(path):
         return [None]
     try:
         import pyogrio
@@ -164,11 +181,15 @@ def process_one(juris, code, snapshot):
         # geodatabase is invisible — Québec's SIGÉOM survives only because the
         # same download also contains a real .gpkg.
         PRIORITY = [".geojson", ".json", ".gpkg", ".gdb", ".fgdb", ".shp",
-                    ".kml", ".kmz", ".gpx"]
+                    COVERAGE, ".kml", ".kmz", ".gpx"]
         # (frame, source_stem) for everything readable at the winning priority.
         loaded: list = []
         for ext in PRIORITY:
-            candidates = [p for p in work.rglob(f"*{ext}") if p.name != "_source.json"]
+            if ext is COVERAGE:
+                candidates = sorted({p.parent for p in work.rglob("*.adf")})
+            else:
+                candidates = [p for p in work.rglob(f"*{ext}")
+                              if p.name != "_source.json"]
             if not candidates:
                 continue
             # Exact-duplicate frames seen so far, bucketed by a cheap key so the
@@ -190,6 +211,11 @@ def process_one(juris, code, snapshot):
                                   f"an already-loaded layer, skipped")
                             continue
                         seen.setdefault(key, []).append(g)
+                        # Coverage sublayers are topology primitives — every
+                        # coverage has an ARC and a PAL — so the sublayer name
+                        # alone collides across coverages in one download.
+                        stem = (f"{f.name}_{sub}" if sub and is_coverage(f)
+                                else (sub or f.stem))
                         if g.crs is None:
                             g.set_crs(epsg=4326, inplace=True, allow_override=True)
                         else:
@@ -197,7 +223,7 @@ def process_one(juris, code, snapshot):
                         drop_cols = [c for c in g.columns if c.upper() in ("OBJECTID", "FID")]
                         if drop_cols:
                             g = g.drop(columns=drop_cols)
-                        loaded.append((g, sub or f.stem))
+                        loaded.append((g, stem))
                     except Exception as e:                      # noqa: BLE001
                         print(f"   ! vec {f.name}[{sub or '-'}]: {e}", file=sys.stderr)
             if loaded:

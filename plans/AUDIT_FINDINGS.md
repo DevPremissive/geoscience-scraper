@@ -661,7 +661,97 @@ already requires layer+date citation, which the plans note.
 
 ---
 
+## I. Execution findings from C0.1 (2026-08-14)
+
+Found while executing the re-harvest, not by re-auditing. All four were verified against
+live systems or the running code.
+
+### I1 — The staging fix stopped the destruction but not the recovery
+
+622eb08 fixed B1's defect: downloads stage to `<dest>.part` and every early exit unlinks
+the staged copy, never `dest`. Confirmed empirically — a same-day re-run of a harvested
+source leaves the payload byte-identical and the ledger row valid.
+
+**But a re-harvest still would not have restored any of B1's eight lost payloads.** Both
+skip paths treated an orphaned ledger row as proof the data was held:
+
+```
+pre-download   skip when ckan_modified is unchanged
+post-download  skip when sha256 is unchanged
+```
+
+The servers still serve identical bytes, so for all eight the sha matched, the freshly
+downloaded copy was staged, compared, and deleted — leaving the row pointing at nothing,
+exactly as before. Observed directly: `ON_GEOL_BEDROCK`, `ON_GEOL_SURFICIAL`, `ON_OMI` and
+`ON_GEOCHEM` each created an empty snapshot directory and printed **no output at all**; the
+run counted them as `skipped`, which reads as success.
+
+Both skips are now conditional on the referenced file existing (`payload_present()`). Where
+the bytes match but the payload is gone, the staged copy is promoted and the row heals onto
+it. Verified on `ON_OMI`: recovered at 6,304,937 bytes, matching B1's recorded size exactly.
+
+**Doctrine:** "unchanged" is a statement about two things — the remote bytes *and* the local
+copy. Checking only the first is how a repair silently becomes a no-op.
+
+### I2 — PLAN_C0's LIO layer table lists two group layers as harvestable
+
+`GeologyOntario_Map/MapServer` layer ids **53 and 58 are ArcGIS Group Layers**, not feature
+layers, so querying either returns no features:
+
+```
+58 Precambrian  type=Group Layer  subLayers=[54,55,56,57]
+53 Quaternary   type=Group Layer  subLayers=[52]
+```
+
+C1's layer list and PLAN_C0 0.1 "Third" both list them alongside real layers. The ten
+genuine feature layers are registered instead; counts probed live and the two the audit
+stated are exact:
+
+```
+47 OMEIS Drill Hole 172,259   50 OMEIS Technical File Area 62,436   46 OMI 18,713
+48 AMIS Site 6,208   49 AMIS Feature 20,794   57 Bedrock Geology 20,956
+54 Faultlines 27,042   55 Iron Formation 2,566   56 Dikes 17,038   52 Quaternary 17,906
+```
+
+### I3 — `SK__SK_SMDI` 140 rows: diagnosed (gap #15)
+
+D5 flagged the count as implausible and left it undiagnosed. The cause is in our code, not
+the source. `connectors/arcgis.py:54` builds every Hub download as:
+
+```python
+url = f"{portal}/api/download/v1/items/{item_id}/geojson?layers=1"   # layers=1 hardcoded
+```
+
+For the SMDI item, sub-layer 1 is the **mines-only** subset. The evidence is in the payload:
+all 140 records carry a producing/past-producing `STATUS` — no occurrences, showings or
+prospects, which are the bulk of a deposit index — over a contiguous `OBJECTID` range
+779–918.
+
+```
+STATUS  Producing Mine 37 · Past Producing without Reserves/Resources 35
+        Past-Producing without Resources 32 · Past-Producing with Resources 28
+        Past Producing with Reserves/Resources 8          (140 total, no non-mine class)
+```
+
+**Not fixed here.** The correct endpoint could not be resolved: `gis.saskatchewan.ca/egis`
+returns `500 9017$SITE_NOT_INITIALIZED` service-wide, including for the already-registered
+`SK_MINERAL_EXPLORATION` layer. Retry before N4; if the outage persists, the hardcoded
+`layers=1` needs to become a per-item registry field either way.
+
+### I4 — One HTML payload the audit did not record
+
+`verify_harvest.py` sniffed all 780 payloads then on disk. Beyond B3's known set (38 FED
+geophysics + ON bedrock + ON surficial) there is one more: `BC_GEOCHEM`'s *"RGS Regional
+Geochemical Database.zip"* is a GeoFiles landing page, not a ZIP.
+
+**This does not touch the audit's BC figures.** RGS2020's 65,008 × 193 comes from
+`RGS2020_data.xlsx` (48 MB) in the same snapshot, which harvested correctly — `BC_GEOCHEM`
+is a multi-resource dataset and only this one sibling resource failed.
+
+---
+
 ## Change log
 
 - **2026-08-13** — initial audit; all findings above recorded after a second challenge pass. Six first-pass conclusions were corrected: B1 strengthened, B2 reframed, B4/D3/D5-Chroma downgraded, A2 qualified.
 - **2026-08-13 (third pass)** — finding F: the MLAS operational bulk shapefiles overturn A2. Ontario ownership and an unbiased 2018-onward staked/dropped history are openly published. Phase 1 reverted to Ontario; C0.9 withdrawn; gap #11 closed and #16 opened.
+- **2026-08-14 (execution pass)** — section I, found while running C0.1 rather than by auditing: the harvest skip logic would have made the re-harvest a silent no-op (I1); two of the LIO layer ids the plan lists are group layers (I2); gap #15 `SK_SMDI` diagnosed as our own hardcoded `layers=1`, fix blocked on an SK service outage (I3); one further HTML payload found by `verify_harvest.py` (I4). B2's 1,016 ogsearth rows reconciled from disk, sha-verified — no data lost, as predicted.

@@ -130,17 +130,51 @@ def lname_clean(name: str) -> str:
     return name.replace(" ", "_").replace("-", "_")[:62]
 
 
+def same_layer(a, b) -> bool:
+    """True when two frames hold identical attributes and identical geometry.
+
+    Nova Scotia ships its mineral rights twice in every package — as
+    `t493nsal_mineral_rights_dp` and `t493nsal_2026_06JUN_12_0205` inside the
+    geodatabase, and as two separate `.shp` files in the shapefile bundle —
+    2,227 rows each. Merged on their shared schema they report 4,454.
+
+    Identity here means every attribute and every geometry matches, so
+    discarding one copy cannot lose information. That holds across files as
+    well as within a container: two OGSEarth tiles cover disjoint ground and
+    cannot produce identical geometry sets, and in the one degenerate case
+    where they could — a single claim straddling two otherwise-empty tiles —
+    keeping one copy is the more correct answer, not the lossy one.
+    """
+    cols = [c for c in a.columns if c != "geometry"]
+    if sorted(cols) != sorted(c for c in b.columns if c != "geometry"):
+        return False
+    if not a[cols].reset_index(drop=True).equals(b[cols].reset_index(drop=True)):
+        return False
+    return bool(a.geometry.reset_index(drop=True)
+                 .geom_equals(b.geometry.reset_index(drop=True)).all())
+
+
 def process_one(juris, code, snapshot):
     print(f"\n[{juris}/{code}] {snapshot.name}")
     with tempfile.TemporaryDirectory() as td:
         work = expand(snapshot, Path(td) / "w")
-        PRIORITY = [".geojson", ".json", ".gpkg", ".shp", ".kml", ".kmz", ".gpx"]
+        # `.gdb`/`.fgdb` sit above `.shp`: a File Geodatabase is a *directory*,
+        # it carries richer types than a shapefile, and where a vendor ships both
+        # (Nova Scotia) they hold the same data. Without them here, an extracted
+        # geodatabase is invisible — Québec's SIGÉOM survives only because the
+        # same download also contains a real .gpkg.
+        PRIORITY = [".geojson", ".json", ".gpkg", ".gdb", ".fgdb", ".shp",
+                    ".kml", ".kmz", ".gpx"]
         # (frame, source_stem) for everything readable at the winning priority.
         loaded: list = []
         for ext in PRIORITY:
             candidates = [p for p in work.rglob(f"*{ext}") if p.name != "_source.json"]
             if not candidates:
                 continue
+            # Exact-duplicate frames seen so far, bucketed by a cheap key so the
+            # expensive comparison only runs against genuine candidates. Without
+            # the bucket this is quadratic over 1,541 OGSEarth tiles.
+            seen: dict = {}
             for f in candidates:
                 # Containers hold many layers — gpd.read_file() would silently
                 # return only the first. QC's sigeom.gpkg carries 28.
@@ -149,6 +183,13 @@ def process_one(juris, code, snapshot):
                         g = gpd.read_file(f, layer=sub) if sub else gpd.read_file(f)
                         if g.empty:
                             continue
+                        key = (len(g), tuple(sorted(c for c in g.columns
+                                                    if c != "geometry")))
+                        if any(same_layer(g, prev) for prev in seen.get(key, ())):
+                            print(f"   = dup {f.name}[{sub or '-'}] — identical to "
+                                  f"an already-loaded layer, skipped")
+                            continue
+                        seen.setdefault(key, []).append(g)
                         if g.crs is None:
                             g.set_crs(epsg=4326, inplace=True, allow_override=True)
                         else:

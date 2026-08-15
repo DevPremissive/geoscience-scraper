@@ -175,20 +175,32 @@ def _layer_has_geometry(path, layer) -> bool:
 
 
 def _table_to_parquet(path, layer, out: Path) -> int:
-    """Write a geometry-less container layer straight to Parquet.
+    """Stream a geometry-less container layer to Parquet in record batches.
 
-    Uses pyogrio's Arrow reader so 21 M rows never pass through a pandas
-    object-dtype round trip.
+    Québec's `R1E03_RESULTAT_ANALYSE_ES` is 21,237,346 rows and `_ER` another
+    18,243,268. Materialising either as one Arrow table alongside the frames
+    already held for this source was enough to be OOM-killed, so batches are
+    written as they arrive and peak memory stays bounded by one batch rather
+    than by the layer.
     """
     import pyogrio, pyarrow.parquet as pq
+    kw = {"layer": layer} if layer else {}
     try:
-        meta, table = pyogrio.raw.read_arrow(str(path), layer=layer) if layer \
-            else pyogrio.raw.read_arrow(str(path))
-        pq.write_table(table, out)
-        return table.num_rows
+        with pyogrio.raw.open_arrow(str(path), use_pyarrow=True, **kw) as (_meta, reader):
+            writer = None
+            n = 0
+            try:
+                for batch in reader:
+                    if writer is None:
+                        writer = pq.ParquetWriter(out, batch.schema)
+                    writer.write_batch(batch)
+                    n += batch.num_rows
+            finally:
+                if writer is not None:
+                    writer.close()
+        return n
     except Exception:                                           # noqa: BLE001
-        import pyogrio as _p
-        df = _p.read_dataframe(str(path), layer=layer, read_geometry=False)
+        df = pyogrio.read_dataframe(str(path), read_geometry=False, **kw)
         df.to_parquet(out, index=False)
         return len(df)
 

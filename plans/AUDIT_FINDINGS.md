@@ -914,6 +914,64 @@ files have no distinct spatial footprint. That is exactly the "documents vs file
 D5 raised and left open. **C3.4/C5 should budget a 90,962-document corpus, not 62,357** — 46%
 more text than planned. Use the ES index for text, `ON_OMEIS_TECHFILE` where geometry matters.
 
+### I12 — **F3 is wrong: the OGSEarth KMZ does not undercount. Our harvest did.**
+
+This one changes a conclusion the plans lean on, so it is stated plainly.
+
+F3 records the harvested KMZ at **202,407** claims against MLAS's 401,594 and concludes the
+province's KMZ product *"undercounts claims by half"*. Gap #16 is built on that sentence, and
+§0 lists 202,407 among the counts that prove the plans were reliable.
+
+Re-harvesting Ontario completely and rebuilding the layer gives:
+
+```
+ON__ON_CLAIMS2  (OGSEarth KMZ, 355 tiles)          401,705
+ON__ON_MLAS_TENURE__Operational_Cell_Claims        401,704
+```
+
+**A difference of one feature.** The KMZ was never undercounting. The cause is B1's own
+destruction bug, and the mechanism is `process.py:latest()`, which takes the newest dated
+directory without checking that it is complete:
+
+| Source | tiles on 2026-06-13 | tiles on 2026-08-14 |
+|---|---:|---:|
+| `ON_CLAIMS2` | **164** | 355 |
+| `ON_ALIENATIONS` | **106** | 434 |
+
+The same-day re-run deleted files from the 06-13 snapshot, `latest()` picked that damaged
+snapshot over the intact 06-12 one, and every Ontario tenure count in the lake has been
+derived from **46% of the claim tiles and 24% of the alienation tiles** ever since.
+
+**Every "verified exact" Ontario tenure count in §0 is therefore exact about a damaged
+snapshot and wrong about Ontario.** Corrected, and cross-validated against MLAS, which is an
+independently produced product:
+
+| Layer | §0 / plans | corrected | MLAS equivalent |
+|---|---:|---:|---:|
+| `ON_CLAIMS2` | 202,407 | **401,705** | 401,704 |
+| `ON_ALIENATIONS` | 3,480 | **23,418** | 16,812 |
+| `ON_DISPOSITIONS` | 24,440 | **24,450** | 22,940 |
+| `ON_DISPOSITIONS_NONMINING` | 231,389 | **230,843** | 193,755 |
+| `ON_PLANS_PERMITS` | 4,571 | **934** | 800 |
+
+The two products now agree to within a few percent everywhere, which is the expected shape:
+they are different renderings of one registry. (`ON_PLANS_PERMITS` fell because the old figure
+double-counted polygons repeated across tile boundaries; 934 against MLAS's 800 is the sane
+answer, 4,571 was not.)
+
+**What survives of F3 and gap #16.** The recommendation is unchanged and still correct, but
+for one reason instead of two: MLAS carries `HOLDER`, `ISSUE_DATE`, `ANNIVERSAR`, `CLAIM_DUE_`
+and a 431,584-row cancellation register, and the KMZ carries none of that. *That* is why MLAS
+is authoritative. The claim-count argument must be withdrawn — and gap #16's headline,
+"undercounts by ~50%", deleted rather than softened.
+
+**The lesson is the one §8 already names, turned inward.** "Verify the product, not the
+portal" was recorded after measuring a real product and generalising wrongly. Here the
+measurement itself was of our own damaged copy. A count taken from the lake describes the
+lake; only a count reconciled against the publisher describes the world. `latest()` needs a
+completeness check before C3.1 automates this — a partial snapshot currently outranks a
+complete one purely by being newer.
+
 ---
 
 ## Change log

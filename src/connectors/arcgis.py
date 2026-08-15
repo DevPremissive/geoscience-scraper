@@ -10,7 +10,7 @@ Output records look like CKAN ones so the harvester treats them uniformly: the "
 is a ready-to-GET endpoint that returns GeoJSON.
 """
 from __future__ import annotations
-import json, time
+import json, sys, time
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -63,6 +63,33 @@ def discover(spec: dict, jurisdiction: str) -> list[dict]:
     return out
 
 
+#: Attempts per page before the whole layer is abandoned.
+PAGE_ATTEMPTS = 4
+
+
+def _get_page(url: str) -> dict:
+    """Fetch one page, retrying transient server-side drops.
+
+    The Ontario LIO service closes the connection partway through long paged
+    reads — `Remote end closed connection without response`, and an SSL
+    `UNEXPECTED_EOF_WHILE_READING`. Without a per-page retry a single dropped
+    page discards every page already fetched, which is why the 172,259-feature
+    OMEIS drillhole layer never completed while short layers on the same
+    service succeeded first time.
+    """
+    delay = 2
+    for attempt in range(1, PAGE_ATTEMPTS + 1):
+        try:
+            return _get_json(url)
+        except Exception as e:                                  # noqa: BLE001
+            if attempt == PAGE_ATTEMPTS:
+                raise
+            print(f"    … page retry {attempt}/{PAGE_ATTEMPTS - 1}: {e}",
+                  file=sys.stderr)
+            time.sleep(delay)
+            delay *= 2
+
+
 def fetch_layer_paged(layer_url: str, out_path) -> int:
     """Page an ArcGIS layer to a single GeoJSON FeatureCollection on disk."""
     features: list[dict] = []
@@ -71,7 +98,7 @@ def fetch_layer_paged(layer_url: str, out_path) -> int:
         q = urlencode({"where": "1=1", "outFields": "*", "f": "geojson",
                        "resultOffset": offset, "resultRecordCount": C.ARCGIS_PAGE,
                        "outSR": 4326})
-        data = _get_json(f"{layer_url}/query?{q}")
+        data = _get_page(f"{layer_url}/query?{q}")
         batch = data.get("features", [])
         features.extend(batch)
         if len(batch) < C.ARCGIS_PAGE:

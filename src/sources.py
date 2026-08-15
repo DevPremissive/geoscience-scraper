@@ -229,11 +229,18 @@ PROVINCES = {
                     "index": "assessment",
                     "resource_name": "Online Assessment File Database (OAFD) — full scroll export",
                     "query": {"match_all": {}},
-                    "notes": "62,357 assessment report records via GeoHub Elasticsearch scroll API. "
+                    "notes": "90,962 assessment file records via GeoHub Elasticsearch scroll API "
+                             "(counted from a full scroll export, 2026-08-14: 90,962 lines, 90,962 "
+                             "distinct file_id — the previous '62,357' here was stale). "
                              "No bulk ZIP. Each record has file_id, NTS sheet, commodities, "
                              "authors, claims, work types, drill hole counts, and links to PDF "
                              "(AFRI system). This is the STRUCTURED METADATA layer; the actual PDFs "
-                             "are downloaded by ON_AFRI_PDF scrape connector.",
+                             "are downloaded by ON_AFRI_PDF scrape connector. "
+                             "RECONCILING THE THREE AFRI COUNTS: 90,962 assessment FILES here, "
+                             "against 62,436 technical file AREAS in ON_OMEIS_TECHFILE (arcgis "
+                             "layer 50). Those are different things — ~28.5k files have no distinct "
+                             "spatial footprint. Use this index for the text corpus (C3.4/C5) and "
+                             "ON_OMEIS_TECHFILE when geometry is required.",
                 },
             },
             "notes": "ONTARIO ES_SCROLL — GeoHub Elasticsearch API w/search_after pagination. "

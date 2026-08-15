@@ -876,6 +876,44 @@ Two carry-forwards. The `(NN)` share prefix on `HOLDER` still needs parsing into
 with `process.py`'s raw lift. And `STATUS` on the cancelled register must be split before any
 row is treated as a drop (F2's caveat), which is likewise C0.7's job.
 
+### I10 — All eight lost payloads recovered; two further defects found doing it
+
+Every payload B1 recorded as lost is back, each matching B1's recorded byte count exactly.
+`es_scroll` in particular returned 90,962 OAFD records and 6,205 AMIS — the connector the
+original C0.1 text said "produced nothing", confirming B1's correction.
+
+Two defects surfaced only because the run was watched rather than trusted:
+
+**Truncated downloads were stored as successes.** The 640 MB `endm_administrative_gis_data.zip`
+arrived as a **291,209,216-byte fragment**, was hashed, written into the snapshot and recorded
+in the ledger as a successful fetch. `zipfile.is_zipfile` → **False**; no central directory.
+`r.read()` returning `b""` means the *connection* ended, not that the file is complete, and
+urllib does not enforce `Content-Length`. Now a hard failure at download, plus a
+central-directory check in `verify_harvest` — which found this file and nothing else across
+1,562 Ontario payloads.
+
+**Transient DNS failure silently cost 7 of 10 ArcGIS layers.** Mid-run, seven layers failed
+with `Temporary failure in name resolution` and `Remote end closed connection`; the network
+then recovered and the remaining layers succeeded. Nothing retries, so a network blip
+quietly leaves a jurisdiction half-harvested. **`harvest.py` has no retry logic at all** —
+worth adding before C3.1 runs this unattended daily, which is the whole point of C3.1.
+
+### I11 — The AFRI count reconciled; D5 corrected it in the wrong direction
+
+D5 recorded the plans' "ON AFRI 100k+" as wrong and `62,357` as right. A full scroll export
+settles it — the plans were closer:
+
+| Figure | Value | What it counts |
+|---|---:|---|
+| `sources.py` note (pre-existing) | 62,357 | stale, source unknown |
+| `ON_OMEIS_TECHFILE`, ArcGIS layer 50 | 62,436 | technical file **areas** — spatial footprints |
+| **OAFD Elasticsearch, harvested 2026-08-14** | **90,962** | assessment **files**, 90,962 distinct `file_id` |
+
+The two live numbers are both correct and measure different things — roughly 28,500 assessment
+files have no distinct spatial footprint. That is exactly the "documents vs files" possibility
+D5 raised and left open. **C3.4/C5 should budget a 90,962-document corpus, not 62,357** — 46%
+more text than planned. Use the ES index for text, `ON_OMEIS_TECHFILE` where geometry matters.
+
 ---
 
 ## Change log

@@ -100,22 +100,45 @@ def stream_download(url, dest):
     not enforce Content-Length. That silently produced a 291 MB fragment of the
     640 MB MLAS administrative bundle which was stored, hashed, and recorded in
     the ledger as a successful fetch; only opening it as a ZIP revealed it had
-    no central directory. Short reads are now a hard failure, so the staged
-    `.part` is discarded and the source is reported as failed rather than
-    quietly poisoning the snapshot.
+    no central directory. A short read is now a hard failure, so nothing reaches
+    the snapshot or the ledger unless the whole file arrived.
+
+    The staged `.part` is kept on failure and resumed via a Range request, since
+    that server drops this transfer every time and retrying from zero never
+    finishes. A `.part` surviving from an earlier run is resumed too; if the
+    remote file changed in between the result is a spliced file, which the
+    central-directory check in `verify_harvest.py` rejects rather than storing.
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
-    h = hashlib.sha256(); n = 0
-    req = Request(url, headers={"User-Agent": C.USER_AGENT})
+    # Resume a partial `.part` with a Range request. MNDM drops the 640 MB
+    # administrative bundle somewhere between 90 and 290 MB every time, so
+    # retrying from zero never finishes; continuing from where it stopped does.
+    start = dest.stat().st_size if dest.exists() else 0
+    headers = {"User-Agent": C.USER_AGENT}
+    if start:
+        headers["Range"] = f"bytes={start}-"
+
+    req = Request(url, headers=headers)
     with urlopen(req, timeout=C.TIMEOUT) as r:
+        if start and r.getcode() != 206:
+            start = 0            # server ignored Range — start over cleanly
         declared = r.headers.get("Content-Length")
         declared = int(declared) if declared and declared.isdigit() else None
-        with open(dest, "wb") as f:
+        expected = start + declared if declared is not None else None
+        with open(dest, "ab" if start else "wb") as f:
             while chunk := r.read(1 << 16):
-                f.write(chunk); h.update(chunk); n += len(chunk)
-    if declared is not None and n != declared:
-        raise IOError(f"truncated download: got {n:,} bytes, "
-                      f"Content-Length declared {declared:,}")
+                f.write(chunk)
+
+    n = dest.stat().st_size
+    if expected is not None and n != expected:
+        raise IOError(f"truncated download: got {n:,} bytes, expected {expected:,}")
+
+    # Hash the finished file rather than the stream, so a resumed download and
+    # a single-shot one produce the same digest.
+    h = hashlib.sha256()
+    with open(dest, "rb") as f:
+        while chunk := f.read(1 << 20):
+            h.update(chunk)
     return h.hexdigest(), n
 
 
@@ -123,7 +146,7 @@ def stream_download(url, dest):
 FETCH_ATTEMPTS = 3
 
 
-def with_retry(fn, what: str, tmp):
+def with_retry(fn, what: str, tmp, cleanup=True):
     """Run `fn`, retrying transient network failures with a growing backoff.
 
     A single DNS hiccup mid-run cost 7 of 10 Ontario ArcGIS layers — the errors
@@ -133,15 +156,18 @@ def with_retry(fn, what: str, tmp):
     half-harvested and silent about it. C3.1 runs this unattended every day,
     which makes one-shot fetching untenable.
 
-    The staged `.part` is discarded between attempts so a partial body from a
-    failed try can never be mistaken for the next one's output.
+    `cleanup` controls whether the staged `.part` is discarded between attempts.
+    It must be True for connectors that build a file whole (ArcGIS/WFS paging,
+    Elasticsearch scroll), where a partial body would corrupt the next try. It is
+    False for plain HTTP downloads, which resume from the bytes already on disk.
     """
     delay = 3
     for attempt in range(1, FETCH_ATTEMPTS + 1):
         try:
             return fn()
         except Exception as e:                                  # noqa: BLE001
-            tmp.unlink(missing_ok=True)
+            if cleanup:
+                tmp.unlink(missing_ok=True)
             if attempt == FETCH_ATTEMPTS:
                 raise
             print(f"  … retry {attempt}/{FETCH_ATTEMPTS - 1} {what}: {e}",
@@ -229,8 +255,11 @@ def main():
             return sha, size, extra
 
         try:
+            # Paged/scrolled connectors rebuild their output from scratch each
+            # attempt; plain downloads resume, so their partial must survive.
+            paged = r["connector"] in ("arcgis_layer", "wfs_layer", "es_scroll")
             sha, size, extra = with_retry(
-                _fetch, f"{r['jurisdiction']}/{r['code']}", tmp)
+                _fetch, f"{r['jurisdiction']}/{r['code']}", tmp, cleanup=paged)
         except Exception as e:                                  # noqa: BLE001
             tmp.unlink(missing_ok=True)
             print(f"  ! FAIL {r['jurisdiction']}/{r['code']} {fname}: {e}", file=sys.stderr)

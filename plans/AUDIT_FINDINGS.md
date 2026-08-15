@@ -748,6 +748,71 @@ Geochemical Database.zip"* is a GeoFiles landing page, not a ZIP.
 `RGS2020_data.xlsx` (48 MB) in the same snapshot, which harvested correctly — `BC_GEOCHEM`
 is a multi-resource dataset and only this one sibling resource failed.
 
+### I5 — Ontario geophysics is real, and it is not "KML previews only"
+
+PLAN_C0 0.1's remaining-items table dismisses `ON_GEOPHYS` as *"KML previews only (3–58 KB)"*
+and routes it to C3.2. That describes the **2026-06-12** snapshot. The 2026-06-13 ledger row
+recorded 245,860,577 bytes, and re-fetching recovered exactly that, passing the HTML sniff:
+
+```
+Single Master Gravity and Aeromagnetic Data (Geosoft format).zip   245,860,577 bytes
+  ONDIGMAG.gdb  ONDTZMAG.gdb  ONGRAVTY.gdb          ← Geosoft databases
+  ONMAGONL.GRD  ONMAG1VD.GRD  ONGRV1VD.GRD (+ .gi)  ← gridded mag + gravity, 1VD
+  GDS1036 Readme.txt / .doc
+```
+
+The modality table in MASTER §6b records **Geophysics: EMPTY** nationally and gap #1 calls it
+"the most-used MPM evidence layers". Ontario — the Phase 1 jurisdiction — now holds provincial
+gravity and magnetics on disk, including first-vertical-derivative grids. This does not close
+gap #1 (that is national coverage via the GDR portal) but it removes the Phase-1 blocker.
+
+**Caveat:** Geosoft `.GRD`/`.gdb` are proprietary and are *not* read by rasterio or GDAL's
+common drivers. Converting them to COGs is real work and belongs in C0.4, not in C3.2's
+browser-automation scope. Budget for it before assuming these grids are usable.
+
+### I6 — The CGMC "legend GPKG" is a QGIS style file, and C2.1's corpus premise fails on it
+
+C0.3 states: *"The CGMC legend GPKG (unit-description text) is the primary corpus for C2.1 —
+verify it loads and its description fields are non-empty."* It does not load, because it is
+not a GeoPackage:
+
+```
+Canada Geological Map Compilation - Legend file (gpkg) - English.gpkg   10,613 bytes
+file → QGIS XML document        <!DOCTYPE qgis ...> version 3.28.2-Firenze
+pyogrio.list_layers → DataSourceError: not recognized as being in a supported file format
+```
+
+It is a QGIS `.qml` layer-style document named `.gpkg` — the same extension-lies pattern as
+E1, but a style sheet rather than a container, so the 0.2 ZIP sniff does not touch it. Parsed
+as XML it yields **34 `paletteEntry` value→label pairs**:
+
+```
+1 mixed volcanic · 2 alkalic volcanic · 3 felsic volcanic · 5 mafic volcanic
+8 anorthosite · 10 pegmatite · 14 amphibolite · 15 charnockite  … 34 total
+label length: min 5, max 22, mean 12 characters
+```
+
+**Two consequences.** (1) This is the **value→lithology decoder for the 610 MB raster** — 34
+classes — and without it the raster's pixel values are meaningless. C0.4 must ingest it
+alongside the GeoTIFF. (2) It is **not a text corpus**: all 34 labels together are roughly 400
+characters. C2.1's "primary corpus" must come from somewhere with real descriptive prose —
+QC bedrock polygons, BC bedrock, or MRD126 unit attributes — and C2.1 should be re-scoped
+accordingly before it is built.
+
+### I7 — 47 misnamed containers, not 46
+
+Re-scanning by magic bytes finds **47** files whose extension claims a geo format while the
+content is a ZIP, totalling **8.34 GB** (E1 recorded 46 / ~7.7 GB):
+
+```
+QC 38  (.fgdb 13, .gpkg 12, .shp 13)      BC 1 (.shp)   NB 6 (.shp)   NS 2 (.gdb, .shp)
+```
+
+The extra file is `QC_SIGEOM_EXAMINE/… Document Examine - Jeux de données géographiques .fgdb`
+— note the **space before the extension**, the likely reason it fell out of E1's scan
+pipeline. The corrected count is self-consistent with the audit's own verified "QC SIGÉOM 13
+packages": there are exactly 13 `.fgdb`, one per package.
+
 ---
 
 ## Change log

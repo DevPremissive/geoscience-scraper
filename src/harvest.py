@@ -93,12 +93,29 @@ def sniff_container(path) -> str | None:
 
 
 def stream_download(url, dest):
+    """Stream `url` to `dest`, refusing a transfer that ended early.
+
+    `r.read()` returning b"" means "connection finished", not "file complete" —
+    a dropped connection is indistinguishable from a clean end, and urllib does
+    not enforce Content-Length. That silently produced a 291 MB fragment of the
+    640 MB MLAS administrative bundle which was stored, hashed, and recorded in
+    the ledger as a successful fetch; only opening it as a ZIP revealed it had
+    no central directory. Short reads are now a hard failure, so the staged
+    `.part` is discarded and the source is reported as failed rather than
+    quietly poisoning the snapshot.
+    """
     dest.parent.mkdir(parents=True, exist_ok=True)
     h = hashlib.sha256(); n = 0
     req = Request(url, headers={"User-Agent": C.USER_AGENT})
-    with urlopen(req, timeout=C.TIMEOUT) as r, open(dest, "wb") as f:
-        while chunk := r.read(1 << 16):
-            f.write(chunk); h.update(chunk); n += len(chunk)
+    with urlopen(req, timeout=C.TIMEOUT) as r:
+        declared = r.headers.get("Content-Length")
+        declared = int(declared) if declared and declared.isdigit() else None
+        with open(dest, "wb") as f:
+            while chunk := r.read(1 << 16):
+                f.write(chunk); h.update(chunk); n += len(chunk)
+    if declared is not None and n != declared:
+        raise IOError(f"truncated download: got {n:,} bytes, "
+                      f"Content-Length declared {declared:,}")
     return h.hexdigest(), n
 
 

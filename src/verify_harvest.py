@@ -16,6 +16,10 @@ Two independent checks, both safe to run at any time:
              registry's declared `format`. HTML served in place of a binary is
              the failure that turned ON bedrock and FED geophysics into 6 KB
              error pages while the ledger recorded them as successful ZIPs.
+             Archives are additionally opened to confirm they have a central
+             directory: a truncated ZIP still begins with `PK\x03\x04`, so
+             magic bytes alone called a 291 MB fragment of the 640 MB MLAS
+             administrative bundle a healthy download.
 
 Run after every harvest. `--fix` is required before the reconciler writes.
 
@@ -25,7 +29,7 @@ Usage:
     python src/verify_harvest.py verify --jurisdiction ON
 """
 from __future__ import annotations
-import argparse, hashlib, sqlite3, sys
+import argparse, hashlib, sqlite3, sys, zipfile
 from collections import Counter
 from pathlib import Path
 
@@ -117,9 +121,22 @@ def reconcile(con, fix=False, only_j=None, only_c=None):
     return len(orphans)
 
 
+def _zip_complete(path) -> bool:
+    """True when a ZIP has a readable central directory, i.e. is not truncated.
+
+    Magic-byte sniffing cannot see this: a fragment of a ZIP still starts with
+    `PK\\x03\\x04`. The central directory lives at the *end*, so this is the
+    cheapest honest test that the whole file arrived.
+    """
+    try:
+        return zipfile.is_zipfile(path)
+    except OSError:
+        return False
+
+
 def verify(con, only_j=None, only_c=None):
     """Sniff every payload; report content that contradicts its declared format."""
-    checked = html = mismatch = absent = 0
+    checked = html = mismatch = absent = truncated = 0
     problems = []
 
     for _rowid, juris, code, conn, fmt, _sha, _size, lp, snap in _rows(con, only_j, only_c):
@@ -139,17 +156,23 @@ def verify(con, only_j=None, only_c=None):
         elif sniffed == "sqlite" and fmt not in ("gpkg", "sqlite", "db"):
             mismatch += 1
             problems.append(("SQLITE-as-" + fmt, juris, code, snap, fmt, p))
+        elif sniffed == "zip" and not _zip_complete(p):
+            # Starts like a ZIP but has no central directory — a fragment of a
+            # download that ended early and was stored as if it succeeded.
+            truncated += 1
+            problems.append(("TRUNCATED-ZIP", juris, code, snap, fmt, p))
 
     print(f"== verify ==")
     print(f"  payloads sniffed              : {checked}")
     print(f"  HTML served as binary         : {html}")
     print(f"  container/format disagreement : {mismatch}")
+    print(f"  truncated archives            : {truncated}")
     print(f"  rows skipped (no file)        : {absent}   (see reconcile)")
     for kind, juris, code, snap, fmt, p in problems[:40]:
         print(f"    {kind:<16}{juris:<4}{code:<20}{snap}  {p.name[:60]}")
     if len(problems) > 40:
         print(f"    … {len(problems)-40} more")
-    return html
+    return html + truncated
 
 
 def main():

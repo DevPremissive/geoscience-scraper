@@ -563,7 +563,21 @@ PROVINCES = {
             "notes": "Yukon Geological Survey: 9 MapServer layers for mineral "
                      "tenure (quartz claims, placer claims, surveyed polygon/line, "
                      "historical, crown grants, leases, groupings). High exploration "
-                     "activity — prioritize.",
+                     "activity — prioritize. "
+                     "YT_HISTORICAL_CLAIMS is the most valuable layer in this registry and "
+                     "the least obvious: 244,703 features, OWNER_NAME populated on 244,654 "
+                     "(4,045 distinct), TENURE_STATUS Expired 238,398 / Active 5,033. Yukon "
+                     "never converted to map staking, so its register was never truncated by "
+                     "a conversion event — this is ~35 years of unbiased staked-AND-dropped "
+                     "history with owners, which no other jurisdiction on this list publishes "
+                     "(see MASTER_PLAN.md §6c). Verified on disk 2026-08-14. "
+                     "TWO TRAPS, both confirmed: (1) STAKING_DATE and EXPIRY_DATE are epoch "
+                     "MILLISECONDS held as float64 — parse with pd.to_datetime(..., unit='ms'); "
+                     "naive string parsing silently collapses everything to 1970. Correctly "
+                     "parsed they span 1899-12-30..2026-04-03 and 1992-11-29..2052-03-25. "
+                     "(2) TENURE_STATUS is NOT clean: alongside the five real values it carries "
+                     "one 'EXPIRED' (case variant of 'Expired') and one 'P' (for 'Pending'). "
+                     "Normalise before splitting status or two tenures land in a null bucket.",
         },
     },
 

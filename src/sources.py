@@ -21,6 +21,11 @@ Where a tenure/scrape endpoint needs a one-time ID lookup, notes say so and the
 discover tooling helps you find it.
 """
 
+#: Ontario's Land Information Ontario GeologyOntario MapServer. Ten feature
+#: layers reachable without a key — see the ON "arcgis" connector below.
+_LIO_GEO = ("https://ws.lioservices.lrc.gov.on.ca/arcgis1071a/rest/services/"
+            "GeologyOntario/GeologyOntario_Map/MapServer")
+
 # ---------------------------------------------------------------------------
 # TIER 1 — FEDERAL / PAN-CANADIAN AGGREGATORS  (start here; standardized layers)
 # ---------------------------------------------------------------------------
@@ -165,6 +170,45 @@ PROVINCES = {
                      "ON_AMIS and ON_OAFD have no bulk download — their data is only accessible via the "
                      "GeoHub Elasticsearch API (ws.apis.lrc.gov.on.ca/mndm/geology/search) with scroll, "
                      "or through the old MNDM file system for individual records.",
+        },
+        "arcgis": {
+            "type": "arcgis",
+            "portal": "https://ws.lioservices.lrc.gov.on.ca",
+            "layers": {
+                # --- OMEIS: the exploration/assessment record ----------------
+                "ON_OMEIS_DRILLHOLE":  _LIO_GEO + "/47",
+                "ON_OMEIS_TECHFILE":   _LIO_GEO + "/50",
+                "ON_OMEIS_MINERAL_INV": _LIO_GEO + "/46",
+                # --- AMIS: abandoned mines -----------------------------------
+                "ON_AMIS_SITE":        _LIO_GEO + "/48",
+                "ON_AMIS_FEATURE":     _LIO_GEO + "/49",
+                # --- MRD126 bedrock geology, served as live layers -----------
+                "ON_GEOL_BEDROCK_ARC": _LIO_GEO + "/57",
+                "ON_GEOL_FAULTS":      _LIO_GEO + "/54",
+                "ON_GEOL_IRON_FM":     _LIO_GEO + "/55",
+                "ON_GEOL_DIKES":       _LIO_GEO + "/56",
+                "ON_GEOL_QUATERNARY":  _LIO_GEO + "/52",
+            },
+            "notes": "ONTARIO LIO ArcGIS REST — keyless, no auth, no scraping, and the "
+                     "cheapest route to everything the Azure-blob and Elasticsearch paths "
+                     "were failing to deliver. All layers report maxRecordCount 2000 with "
+                     "supportsPagination true, matching config.ARCGIS_PAGE. "
+                     "Feature counts probed live 2026-08-14: DRILLHOLE 172,259 · TECHFILE "
+                     "62,436 · MINERAL_INV 18,713 · AMIS_SITE 6,208 · AMIS_FEATURE 20,794 · "
+                     "BEDROCK 20,956 · FAULTS 27,042 · IRON_FM 2,566 · DIKES 17,038 · "
+                     "QUATERNARY 17,906 (~366k features total). "
+                     "ON_OMEIS_DRILLHOLE IS NOT ON_ODHD. ODHD is the Ontario Borehole "
+                     "Database (water wells + geotechnical holes mixed in); OMEIS is the "
+                     "exploration/assessment drillhole layer and is strictly better for "
+                     "C2.4 — ELEMENTS populates commodities_tested[] and HOLE_TYPE lets "
+                     "non-exploration holes be excluded before deriving barren negatives. "
+                     "ON_OMEIS_TECHFILE is the AFRI/assessment-file index WITH geometry, "
+                     "which is what C3.4 needs and requires no Elasticsearch scroll and no "
+                     "API key — compare ON_OAFD in the es_scroll connector below. "
+                     "NOT REGISTERED, deliberately: MapServer ids 53 and 58 are ArcGIS "
+                     "GROUP layers, not feature layers (58 'Precambrian' contains 54/55/56/57, "
+                     "53 'Quaternary' contains 52). PLAN_C0 0.1 lists both as harvestable; "
+                     "querying either returns no features. The children are registered above.",
         },
         "es_scroll": {
             "type": "es_scroll",

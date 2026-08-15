@@ -119,6 +119,37 @@ def stream_download(url, dest):
     return h.hexdigest(), n
 
 
+#: Attempts per resource before it is recorded as failed.
+FETCH_ATTEMPTS = 3
+
+
+def with_retry(fn, what: str, tmp):
+    """Run `fn`, retrying transient network failures with a growing backoff.
+
+    A single DNS hiccup mid-run cost 7 of 10 Ontario ArcGIS layers — the errors
+    were `Temporary failure in name resolution` and `Remote end closed
+    connection without response`, and the network was healthy again seconds
+    later. Nothing retried, so a momentary blip left the jurisdiction
+    half-harvested and silent about it. C3.1 runs this unattended every day,
+    which makes one-shot fetching untenable.
+
+    The staged `.part` is discarded between attempts so a partial body from a
+    failed try can never be mistaken for the next one's output.
+    """
+    delay = 3
+    for attempt in range(1, FETCH_ATTEMPTS + 1):
+        try:
+            return fn()
+        except Exception as e:                                  # noqa: BLE001
+            tmp.unlink(missing_ok=True)
+            if attempt == FETCH_ATTEMPTS:
+                raise
+            print(f"  … retry {attempt}/{FETCH_ATTEMPTS - 1} {what}: {e}",
+                  file=sys.stderr)
+            time.sleep(delay)
+            delay *= 3
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--jurisdiction", nargs="*", default=None)
@@ -165,7 +196,7 @@ def main():
         tmp = dest.with_name(dest.name + ".part")
         dest.parent.mkdir(parents=True, exist_ok=True)
 
-        try:
+        def _fetch():
             if r["connector"] == "arcgis_layer":
                 cnt = arcgis.fetch_layer_paged(r["url"], tmp)
                 sha = hashlib.sha256(tmp.read_bytes()).hexdigest()
@@ -195,6 +226,11 @@ def main():
             else:
                 sha, size = stream_download(r["url"], tmp)
                 extra = ""
+            return sha, size, extra
+
+        try:
+            sha, size, extra = with_retry(
+                _fetch, f"{r['jurisdiction']}/{r['code']}", tmp)
         except Exception as e:                                  # noqa: BLE001
             tmp.unlink(missing_ok=True)
             print(f"  ! FAIL {r['jurisdiction']}/{r['code']} {fname}: {e}", file=sys.stderr)

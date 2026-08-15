@@ -147,6 +147,43 @@ def lname_clean(name: str) -> str:
     return name.replace(" ", "_").replace("-", "_")[:62]
 
 
+def _layer_has_geometry(path, layer) -> bool:
+    """True when a container layer carries geometry.
+
+    Containers mix spatial and flat tables freely. Québec's geochemistry GPKG
+    holds 561,232 sediment sample points beside `R1E03_RESULTAT_ANALYSE_ES`
+    and `_ER` — 39.5 M rows of assay results with no geometry at all. Loading
+    those as GeoDataFrames to write into the *spatial* store cost ~39 M rows of
+    memory and was OOM-killed; Master §4 puts flat tables in Parquet anyway.
+    """
+    try:
+        import pyogrio
+        info = pyogrio.read_info(str(path), layer=layer) if layer \
+            else pyogrio.read_info(str(path))
+        return info.get("geometry_type") not in (None, "Unknown", "None")
+    except Exception:                                           # noqa: BLE001
+        return True          # unreadable metadata: let the normal path try
+
+
+def _table_to_parquet(path, layer, out: Path) -> int:
+    """Write a geometry-less container layer straight to Parquet.
+
+    Uses pyogrio's Arrow reader so 21 M rows never pass through a pandas
+    object-dtype round trip.
+    """
+    import pyogrio, pyarrow.parquet as pq
+    try:
+        meta, table = pyogrio.raw.read_arrow(str(path), layer=layer) if layer \
+            else pyogrio.raw.read_arrow(str(path))
+        pq.write_table(table, out)
+        return table.num_rows
+    except Exception:                                           # noqa: BLE001
+        import pyogrio as _p
+        df = _p.read_dataframe(str(path), layer=layer, read_geometry=False)
+        df.to_parquet(out, index=False)
+        return len(df)
+
+
 def same_layer(a, b) -> bool:
     """True when two frames hold identical attributes and identical geometry.
 
@@ -201,6 +238,14 @@ def process_one(juris, code, snapshot):
                 # return only the first. QC's sigeom.gpkg carries 28.
                 for sub in _sublayers(f):
                     try:
+                        # Flat tables inside a spatial container go to the
+                        # tabular store, not into geo.gpkg (Master §4).
+                        if not _layer_has_geometry(f, sub):
+                            out = (C.TABLES_DIR /
+                                   f"{lname_clean(f'{juris}__{code}__{sub or f.stem}')}.parquet")
+                            n = _table_to_parquet(f, sub, out)
+                            print(f"   table {out.stem:<48}{n:>9}")
+                            continue
                         g = gpd.read_file(f, layer=sub) if sub else gpd.read_file(f)
                         if g.empty:
                             continue

@@ -43,9 +43,31 @@ EVENTS_PATH = C.PROCESSED_DIR / "tenure_events.parquet"
 EVENT_COLUMNS = [
     "event_id", "juris", "source_code", "claim_id", "event_type",
     "event_window_start", "event_window_end", "owner_before", "owner_after",
-    "area_ha", "snapshot_prev", "snapshot_next", "id_confidence",
+    "area_ha", "cell_r7", "snapshot_prev", "snapshot_next", "id_confidence",
     "survivorship_biased",
 ]
+
+
+def cells_r7(gdf):
+    """H3 r7 index per feature, from its centroid. Empty string where unknown.
+
+    Computed here rather than in C1.3 so every consumer of the event stream
+    shares one spatial key, and computed from H3 directly rather than by joining
+    the fabric — an event that falls outside a built fabric is still a located
+    event, and heat must not silently drop it.
+    """
+    import h3
+    import numpy as np
+    # Centroids in a projected CRS: a centroid taken in degrees is not the
+    # centre of the polygon on the ground.
+    cent = gdf.to_crs("EPSG:3978").geometry.centroid.to_crs(4326)
+    out = []
+    for pt in cent:
+        if pt is None or pt.is_empty or np.isnan(pt.x) or np.isnan(pt.y):
+            out.append("")
+        else:
+            out.append(h3.latlng_to_cell(pt.y, pt.x, 7))
+    return out
 
 #: Ontario cancellation STATUS values that are genuine abandonment. The rest are
 #: administrative reorganisations and would read as false drops in C1.3 heat and
@@ -107,11 +129,56 @@ def _empty():
 # --------------------------------------------------------------------------
 
 def build_ontario():
-    """Staked and dropped events from Cancelled_Claim_Polygons (2018-04 →).
+    """Ontario staking and drop events (2018-04 →), from BOTH MLAS registers.
 
-    Unbiased: this register retains the ground that was given up, which is the
-    signal the business depends on and which no other jurisdiction publishes.
+    **Both registers are required, and using only one inverts the signal.**
+    `Cancelled_Claim_Polygons` holds claims that have ENDED, so taking staking
+    events from it alone counts only ground that was later given up. Every claim
+    staked recently and still alive is invisible: the first build of this
+    reported ~2,000 claims staked across 2025, when `Operational_Cell_Claims`
+    shows **89,466**. Ontario's biggest staking year read as its quietest.
+
+    So: `staked` comes from both registers, `expired` only from the cancellation
+    register (an active claim has not expired). Together they are unbiased —
+    which is the property no other jurisdiction's data has.
     """
+    import geopandas as gpd
+    import pandas as pd
+
+    frames = [_ontario_cancelled(), _ontario_active()]
+    df = pd.concat(frames, ignore_index=True)
+    df = df.drop_duplicates(subset=["event_id"])
+    return df
+
+
+def _ontario_active():
+    """`staked` events for claims that are still live."""
+    import geopandas as gpd
+    import pandas as pd
+
+    layer = "ON__ON_MLAS_TENURE__Operational_Cell_Claims"
+    g = gpd.read_file(C.GPKG_PATH, layer=layer,
+                      columns=["TENURE_NUM", "ISSUE_DATE", "HOLDER"])
+    g["ISSUE_DATE"] = pd.to_datetime(g["ISSUE_DATE"], errors="coerce")
+    g = g[g["ISSUE_DATE"].notna()]
+    print(f"  {layer}: {len(g):,} active claims")
+
+    area_ha = g.to_crs("EPSG:6933").area / 10_000.0
+    owner = g["HOLDER"].map(holder_name)
+    cell = cells_r7(g)
+    rows = []
+    for pos, idx in enumerate(g.index):
+        d = g.at[idx, "ISSUE_DATE"]
+        tn = g.at[idx, "TENURE_NUM"]
+        rows.append((_event_id("ON", tn, "staked", d), "ON", "ON_MLAS_TENURE", tn,
+                     "staked", d, d, None, owner.at[idx], float(area_ha.at[idx]),
+                     cell[pos], None, None, "exact", False))
+    print(f"  staked {len(rows):,} (from active claims)")
+    return pd.DataFrame(rows, columns=EVENT_COLUMNS)
+
+
+def _ontario_cancelled():
+    """`staked`, `expired` and `converted` events for claims that have ended."""
     import geopandas as gpd
     import pandas as pd
 
@@ -126,6 +193,7 @@ def build_ontario():
 
     area_ha = g.to_crs("EPSG:6933").area / 10_000.0
     owner = g["HOLDER"].map(holder_name)
+    cell = cells_r7(g)
     rows = []
 
     # staked — every record's issue date, regardless of how it ended
@@ -135,7 +203,7 @@ def build_ontario():
         tn = g.at[idx, "TENURE_NUM"]
         rows.append((_event_id("ON", tn, "staked", d), "ON", "ON_MLAS_TENURE", tn,
                      "staked", d, d, None, owner.at[idx], float(area_ha.at[idx]),
-                     None, None, "exact", False))
+                     cell[g.index.get_loc(idx)], None, None, "exact", False))
 
     # expired — only genuine abandonment
     drop = g["TERMINATIO"].notna() & g["STATUS"].isin(ON_DROP_STATUSES)
@@ -144,7 +212,7 @@ def build_ontario():
         tn = g.at[idx, "TENURE_NUM"]
         rows.append((_event_id("ON", tn, "expired", d), "ON", "ON_MLAS_TENURE", tn,
                      "expired", d, d, owner.at[idx], None, float(area_ha.at[idx]),
-                     None, None, "exact", False))
+                     cell[g.index.get_loc(idx)], None, None, "exact", False))
 
     # converted — administrative reorganisation, kept but NOT a drop
     conv = g["TERMINATIO"].notna() & g["STATUS"].isin(ON_ADMIN_STATUSES)
@@ -153,7 +221,7 @@ def build_ontario():
         tn = g.at[idx, "TENURE_NUM"]
         rows.append((_event_id("ON", tn, "converted", d), "ON", "ON_MLAS_TENURE", tn,
                      "converted", d, d, owner.at[idx], None, float(area_ha.at[idx]),
-                     None, None, "exact", False))
+                     cell[g.index.get_loc(idx)], None, None, "exact", False))
 
     df = pd.DataFrame(rows, columns=EVENT_COLUMNS)
     print(f"  staked {int(issued.sum()):,} · expired {int(drop.sum()):,} "
@@ -189,6 +257,7 @@ def build_yukon():
 
     area_ha = g.to_crs("EPSG:6933").area / 10_000.0
     owner = g["OWNER_NAME"]
+    cell = cells_r7(g)
     rows = []
 
     for idx in g.index[staked.notna()]:
@@ -196,7 +265,8 @@ def build_yukon():
         cid = g.at[idx, "TENURE_HISTORICAL_ID"]
         rows.append((_event_id("YT", cid, "staked", d), "YT", "YT_HISTORICAL_CLAIMS",
                      cid, "staked", d, d, None, owner.at[idx],
-                     float(area_ha.at[idx]), None, None, "exact", False))
+                     float(area_ha.at[idx]), cell[g.index.get_loc(idx)],
+                     None, None, "exact", False))
 
     gone = expiry.notna() & status.isin(["EXPIRED", "LAPSED"])
     for idx in g.index[gone]:
@@ -204,7 +274,8 @@ def build_yukon():
         cid = g.at[idx, "TENURE_HISTORICAL_ID"]
         rows.append((_event_id("YT", cid, "expired", d), "YT", "YT_HISTORICAL_CLAIMS",
                      cid, "expired", d, d, owner.at[idx], None,
-                     float(area_ha.at[idx]), None, None, "exact", False))
+                     float(area_ha.at[idx]), cell[g.index.get_loc(idx)],
+                     None, None, "exact", False))
 
     df = pd.DataFrame(rows, columns=EVENT_COLUMNS)
     print(f"  staked {int(staked.notna().sum()):,} · expired/lapsed {int(gone.sum()):,}")
@@ -286,15 +357,17 @@ def diff_snapshots(juris: str, code: str, prev_date: str, next_date: str,
     print(f"  {code} {prev_date}→{next_date}: {len(sa):,} → {len(sb):,} "
           f"(+{len(new):,} / -{len(gone):,}) id={cand or 'geometry hash'}")
 
+    a_cell = dict(zip(a_ids, cells_r7(a)))
+    b_cell = dict(zip(b_ids, cells_r7(b)))
     rows = []
     for cid in sorted(new):
         rows.append((_event_id(juris, code, cid, "staked", next_date), juris, code,
                      cid, "staked", prev_date, next_date, None, None, None,
-                     prev_date, next_date, conf, False))
+                     b_cell.get(cid, ""), prev_date, next_date, conf, False))
     for cid in sorted(gone):
         rows.append((_event_id(juris, code, cid, "expired", next_date), juris, code,
                      cid, "expired", prev_date, next_date, None, None, None,
-                     prev_date, next_date, conf, False))
+                     a_cell.get(cid, ""), prev_date, next_date, conf, False))
     return pd.DataFrame(rows, columns=EVENT_COLUMNS)
 
 

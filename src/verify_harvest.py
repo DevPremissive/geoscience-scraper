@@ -164,10 +164,29 @@ def _zip_complete(path) -> bool:
         return False
 
 
+def _current_snapshots(con) -> dict:
+    """Newest snapshot date per (jurisdiction, code)."""
+    cur = {}
+    for j, c, s in con.execute("SELECT jurisdiction, code, MAX(snapshot_date) "
+                               "FROM harvest GROUP BY jurisdiction, code"):
+        cur[(j, c)] = s
+    return cur
+
+
 def verify(con, only_j=None, only_c=None):
-    """Sniff every payload; report content that contradicts its declared format."""
+    """Sniff every payload; report content that contradicts its declared format.
+
+    A bad payload in a **superseded** snapshot is history, not a fault: the June
+    Ontario bedrock download really was an HTML interstitial, the source has
+    since been re-harvested correctly, and the broken snapshot is retained under
+    the immutable-dated-snapshot contract. Failing on it would make the C3.1
+    gate permanently red and block processing every day forever — so only
+    problems in a source's *current* snapshot set the exit code.
+    """
     checked = html = mismatch = absent = truncated = 0
+    stale = 0
     problems = []
+    current = _current_snapshots(con)
 
     for _rowid, juris, code, conn, fmt, _sha, _size, lp, snap, _rid in _rows(con, only_j, only_c):
         p = Path(lp)
@@ -177,29 +196,36 @@ def verify(con, only_j=None, only_c=None):
         checked += 1
         sniffed = sniff_container(p)
         fmt = (fmt or "").lower()
+        live = (snap == current.get((juris, code)))
         if sniffed == "html" and fmt not in ("html", "htm"):
-            html += 1
-            problems.append(("HTML", juris, code, snap, fmt, p))
+            html += live
+            stale += (not live)
+            problems.append(("HTML", juris, code, snap, fmt, p, live))
         elif sniffed == "zip" and fmt not in _ZIP_FORMATS:
-            mismatch += 1
-            problems.append(("ZIP-as-" + fmt, juris, code, snap, fmt, p))
+            mismatch += live
+            stale += (not live)
+            problems.append(("ZIP-as-" + fmt, juris, code, snap, fmt, p, live))
         elif sniffed == "sqlite" and fmt not in ("gpkg", "sqlite", "db"):
-            mismatch += 1
-            problems.append(("SQLITE-as-" + fmt, juris, code, snap, fmt, p))
+            mismatch += live
+            stale += (not live)
+            problems.append(("SQLITE-as-" + fmt, juris, code, snap, fmt, p, live))
         elif sniffed == "zip" and not _zip_complete(p):
             # Starts like a ZIP but has no central directory — a fragment of a
             # download that ended early and was stored as if it succeeded.
-            truncated += 1
-            problems.append(("TRUNCATED-ZIP", juris, code, snap, fmt, p))
+            truncated += live
+            stale += (not live)
+            problems.append(("TRUNCATED-ZIP", juris, code, snap, fmt, p, live))
 
     print(f"== verify ==")
     print(f"  payloads sniffed              : {checked}")
     print(f"  HTML served as binary         : {html}")
     print(f"  container/format disagreement : {mismatch}")
     print(f"  truncated archives            : {truncated}")
+    print(f"  superseded snapshots w/ faults: {stale}   (history, not actionable)")
     print(f"  rows skipped (no file)        : {absent}   (see reconcile)")
-    for kind, juris, code, snap, fmt, p in problems[:40]:
-        print(f"    {kind:<16}{juris:<4}{code:<20}{snap}  {p.name[:60]}")
+    for kind, juris, code, snap, fmt, p, live in problems[:40]:
+        tag = "" if live else "  [superseded]"
+        print(f"    {kind:<16}{juris:<4}{code:<20}{snap}  {p.name[:48]}{tag}")
     if len(problems) > 40:
         print(f"    … {len(problems)-40} more")
     return html + truncated

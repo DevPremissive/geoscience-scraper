@@ -113,7 +113,13 @@ def run(cls: str, do_process: bool = True) -> int:
     # Integrity gate. A harvest that "succeeded" while writing HTML error pages
     # or a truncated archive is the exact failure mode C0.1 was built around, so
     # it blocks the pipeline rather than being reported afterwards.
-    vrc, vtail = _run([PYTHON, "-u", "verify_harvest.py"], log)
+    #
+    # Scoped to this class's codes on purpose. A lake-wide check would block the
+    # daily tenure pipeline on an unrelated broken geoscience payload, and a
+    # gate that fails for reasons the run cannot fix is a gate that gets
+    # disabled.
+    class_codes = sorted({c for _j, c in _class_pairs(cls)})
+    vrc, vtail = _run([PYTHON, "-u", "verify_harvest.py", "--only", *class_codes], log)
     if vrc != 0:
         notes.append("verify_harvest rejected payloads")
 

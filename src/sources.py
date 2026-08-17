@@ -638,7 +638,18 @@ PROVINCES = {
             },
             "notes": "NU mineral tenure from Crown-Indigenous Relations (CIRNAC). "
                      "34411 claims, 893 leases, 2600 permits. "
-                     "Also available as CSV exports from the same server.",
+                     "Also available as CSV exports from the same server. "
+                     "BROKEN since at least 2026-08-17: every URL on geo.sac-isc.gc.ca "
+                     "returns an HTML 'URL invalide | Invalid URL' page, including the "
+                     "ArcGIS service ROOT (/geomatics/rest/services and /arcgis/rest/"
+                     "services), so this is the whole server being retired or relocated "
+                     "rather than these three layers moving. The June 2026 snapshots "
+                     "remain on disk and are unaffected — Nunavut tenure is frozen, not "
+                     "lost — but it accrues no new history until a replacement endpoint "
+                     "is found. NU is the jurisdiction whose unbiased history starts "
+                     "2021-01 (MASTER §6c), so the gap compounds. Finding the new home "
+                     "is a discovery task, not a code fix; check open.canada.ca, which "
+                     "mirrors CIRNAC layers, before re-pointing these URLs.",
         },
         "scrape": {
             "type": "scrape",

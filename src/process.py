@@ -35,7 +35,7 @@ def latest(code_dir):
 RUN_MANIFEST = "_manifest.json"
 
 
-def resolve_snapshot(code_dir):
+def resolve_snapshot(code_dir, as_of: str | None = None):
     """Compose the source's current state by overlaying its dated snapshots.
 
     A snapshot directory is a **delta, not a complete copy**: `harvest.py` only
@@ -51,9 +51,15 @@ def resolve_snapshot(code_dir):
     not persist forever — an overlay alone cannot express a deletion. Snapshots
     written before run manifests existed simply are not pruned.
 
+    `as_of` reconstructs the state as it stood on a given date, which is what a
+    point-in-time diff needs: comparing two raw directories compares a complete
+    snapshot against a delta and manufactures thousands of phantom events.
+
     Returns `(effective_date, {relative_name: path})`, empty if nothing exists.
     """
     snaps = sorted((p for p in code_dir.iterdir() if p.is_dir()), key=lambda p: p.name)
+    if as_of:
+        snaps = [s for s in snaps if s.name <= as_of]
     if not snaps:
         return None, {}
 

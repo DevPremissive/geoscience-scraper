@@ -196,7 +196,7 @@ def main():
     only_j = {j.upper() for j in args.jurisdiction} if args.jurisdiction else None
     only_c = {c.upper() for c in args.only} if args.only else None
 
-    inv = discover_all(only_j)
+    inv = discover_all(only_j, cls=args.cls)
     fetched = skipped = failed = pending = 0
     #: (jurisdiction, code) -> filenames this run discovered, fetched or not.
     discovered: dict = {}

@@ -67,6 +67,10 @@ def discover(spec: dict, jurisdiction: str) -> list[dict]:
 PAGE_ATTEMPTS = 4
 
 
+#: Smallest page worth trying before giving up on a layer.
+MIN_PAGE = 50
+
+
 def _get_page(url: str) -> dict:
     """Fetch one page, retrying transient server-side drops.
 
@@ -76,11 +80,18 @@ def _get_page(url: str) -> dict:
     page discards every page already fetched, which is why the 172,259-feature
     OMEIS drillhole layer never completed while short layers on the same
     service succeeded first time.
+
+    Only *transient* failures are retried here. A response that parses as
+    something other than JSON is a deterministic refusal — retrying it just
+    burns the backoff — so it propagates for the caller to handle by asking for
+    less data.
     """
     delay = 2
     for attempt in range(1, PAGE_ATTEMPTS + 1):
         try:
             return _get_json(url)
+        except json.JSONDecodeError:
+            raise
         except Exception as e:                                  # noqa: BLE001
             if attempt == PAGE_ATTEMPTS:
                 raise
@@ -90,20 +101,45 @@ def _get_page(url: str) -> dict:
             delay *= 2
 
 
+def _page_with_backoff(layer_url: str, offset: int, page: int):
+    """One page, halving the request size when the server refuses to serve it.
+
+    Ontario's Provincial Park Regulated layer answers a 2,000-feature GeoJSON
+    request with an HTML error page from the ArcGIS Web Adaptor: parks like
+    Polar Bear and Algonquin carry enormous vertex counts, so the response
+    exceeds what the adaptor will return, and no amount of retrying the same
+    request helps. Smaller pages succeed, so ask for less rather than fail the
+    layer. Returns `(data, page)` so the caller keeps the working size.
+    """
+    while True:
+        q = urlencode({"where": "1=1", "outFields": "*", "f": "geojson",
+                       "resultOffset": offset, "resultRecordCount": page,
+                       "outSR": 4326})
+        try:
+            return _get_page(f"{layer_url}/query?{q}"), page
+        except json.JSONDecodeError:
+            if page <= MIN_PAGE:
+                raise
+            page = max(MIN_PAGE, page // 4)
+            print(f"    … response was not JSON at {page * 4} features; "
+                  f"retrying this page at {page}", file=sys.stderr)
+
+
 def fetch_layer_paged(layer_url: str, out_path) -> int:
     """Page an ArcGIS layer to a single GeoJSON FeatureCollection on disk."""
     features: list[dict] = []
     offset = 0
+    page = C.ARCGIS_PAGE
     while True:
-        q = urlencode({"where": "1=1", "outFields": "*", "f": "geojson",
-                       "resultOffset": offset, "resultRecordCount": C.ARCGIS_PAGE,
-                       "outSR": 4326})
-        data = _get_page(f"{layer_url}/query?{q}")
+        data, page = _page_with_backoff(layer_url, offset, page)
         batch = data.get("features", [])
         features.extend(batch)
-        if len(batch) < C.ARCGIS_PAGE:
+        # Compare against the page size actually used, not the configured one:
+        # after a backoff a full page is smaller, and testing against the
+        # original would stop paging while features remain.
+        if len(batch) < page:
             break
-        offset += C.ARCGIS_PAGE
+        offset += page
         time.sleep(C.REQUEST_GAP)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps({"type": "FeatureCollection",

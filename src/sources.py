@@ -26,6 +26,11 @@ discover tooling helps you find it.
 _LIO_GEO = ("https://ws.lioservices.lrc.gov.on.ca/arcgis1071a/rest/services/"
             "GeologyOntario/GeologyOntario_Map/MapServer")
 
+#: LIO's open-data MapServers are named LIO_Open01..10 with no hint of contents;
+#: protected areas live in 03. Found by scanning all ten for layer names.
+_LIO_OPEN03 = ("https://ws.lioservices.lrc.gov.on.ca/arcgis1071a/rest/services/"
+               "LIO_OPEN_DATA/LIO_Open03/MapServer")
+
 # ---------------------------------------------------------------------------
 # TIER 1 — FEDERAL / PAN-CANADIAN AGGREGATORS  (start here; standardized layers)
 # ---------------------------------------------------------------------------
@@ -221,6 +226,46 @@ PROVINCES = {
                      "GROUP layers, not feature layers (58 'Precambrian' contains 54/55/56/57, "
                      "53 'Quaternary' contains 52). PLAN_C0 0.1 lists both as harvestable; "
                      "querying either returns no features. The children are registered above.",
+        },
+        "arcgis_lio_protected": {
+            "type": "arcgis",
+            "portal": "https://ws.lioservices.lrc.gov.on.ca",
+            "layers": {
+                # --- encumbrances wired into C1.1's subtraction stack --------
+                "ON_PARKS_REGULATED":      _LIO_OPEN03 + "/4",
+                "ON_CONSERVATION_RESERVE": _LIO_OPEN03 + "/2",
+                "ON_FEDERAL_PROTECTED":    _LIO_OPEN03 + "/10",
+                "ON_INDIAN_RESERVE":       _LIO_OPEN03 + "/12",
+                # --- harvested, but NOT assumed to bar staking --------------
+                "ON_LANDFORM_CONSERVATION": _LIO_OPEN03 + "/1",
+                "ON_MUNICIPAL_PARK":        _LIO_OPEN03 + "/3",
+                "ON_PARK_ADMIN_ZONE":       _LIO_OPEN03 + "/5",
+            },
+            "notes": "ONTARIO LIO protected areas — the AUTHORITATIVE source for land "
+                     "withdrawn from staking, keyless like the GeologyOntario service. "
+                     "Counts probed live 2026-08-17: Provincial Park Regulated 347 · "
+                     "Conservation Reserve Regulated 306 · Federal Protected 36 · Indian "
+                     "Reserve 246 · Landform Conservation 244 · Municipal Park 388 · Park "
+                     "Admin Zone 5. All maxRecordCount 5000, supportsPagination true. "
+                     "WHY THIS EXISTS: C1.1 was subtracting parks using PROVINCIALPARK from "
+                     "MRD126-REV1 — basemap furniture inside a 1:250 000 bedrock geology "
+                     "map, not a parks registry. Hand-verification on 2026-08-17 confirmed "
+                     "it was correct for the cells checked AND that MLAS does not expose "
+                     "parks as a selectable layer at all, so it was the only park data in "
+                     "the system. But it carries 336 parks against this layer's 347: it is "
+                     "eleven parks stale, and a park regulated since that map was compiled "
+                     "would leave its ground reading `open`. It also has no conservation "
+                     "reserves at all (~15,000 km², a separate designation). "
+                     "THE SPLIT ABOVE IS DELIBERATE. The first four are unambiguous bars to "
+                     "staking — regulated parks, conservation reserves, federal protected "
+                     "areas and reserve land. The last three are NOT assumed to bar staking: "
+                     "Landform Conservation Areas are a Growth Plan designation, Municipal "
+                     "Parks may hold surface rights only, and Park Admin Zone is an "
+                     "administrative envelope larger than the regulated boundary. Whether "
+                     "each bars staking is a legal question for C1.2's human-verified "
+                     "rules/<juris>.yaml — MASTER §8 is explicit that no scraper substitutes "
+                     "for that — so they are harvested and left out of the subtraction stack "
+                     "until a human rules on them.",
         },
         "es_scroll": {
             "type": "es_scroll",

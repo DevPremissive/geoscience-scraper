@@ -48,20 +48,34 @@ SUBTRACTION_STACK = {
         ("withdrawn", "ON__ON_MLAS_TENURE__Mining_Land_Tenure",        None),
         ("withdrawn", "ON__ON_MLAS_TENURE__Non_Mining_Land_Tenure",    None),
         ("withdrawn", "ON__ON_MLAS_TENURE__Plans_Permits",             None),
-        # PROVENANCE WARNING. This is not a parks registry — it is basemap
-        # furniture inside MRD126-REV1, the 1:250 000 bedrock geology map, so it
-        # is a snapshot from whenever that map was compiled and nothing about it
-        # tracks park regulation. Hand-verification on 2026-08-17 confirmed it is
-        # currently correct AND that MLAS does not expose parks as a selectable
-        # layer at all, so this is the only park data in the system. A park
-        # regulated since MRD126 would leave its ground reading `open`. Replace
-        # with the LIO protected-areas layer before any dossier ships.
-        ("park",      "ON__ON_GEOL_BEDROCK__PROVINCIALPARK",           None),
-        # 2,525 of this layer's 2,532 rows are "Geographic Township, Improved"
-        # covering 358,928 km² — a third of Ontario. Unfiltered it would report
-        # most of the province as parkland.
-        ("park",      "ON__ON_GEOL_BEDROCK__NATIONALPARK",
-                      ("DESCR", "National Park")),
+        # Authoritative LIO protected areas, replacing the MRD126 basemap
+        # polygons this originally used. That layer was park outlines shipped
+        # inside a 1:250 000 bedrock geology map — 336 parks against LIO's 347,
+        # i.e. eleven parks stale, with no conservation reserves at all.
+        ("park",      "ON__ON_PARKS_REGULATED",                        None),
+        ("park",      "ON__ON_CONSERVATION_RESERVE",                   None),
+        ("park",      "ON__ON_FEDERAL_PROTECTED",                      None),
+        ("withdrawn", "ON__ON_INDIAN_RESERVE",                         None),
+    ],
+}
+
+#: Harvested and available, but NOT subtracted, because whether each actually
+#: bars staking is a legal question rather than a data question. MASTER §8 puts
+#: that in C1.2's human-verified rules/<juris>.yaml and says no scraper
+#: substitutes for it. Listed here so the choice is visible rather than an
+#: omission somebody has to notice.
+PENDING_LEGAL_REVIEW = {
+    "ON": [
+        ("ON__ON_LANDFORM_CONSERVATION", 244,
+         "Growth Plan planning designation — restricts development, but does "
+         "not obviously withdraw land from staking."),
+        ("ON__ON_MUNICIPAL_PARK", 388,
+         "Municipal land. Surface rights and mining rights are frequently "
+         "severed in Ontario, so a municipal park does not by itself imply the "
+         "mining rights are unavailable."),
+        ("ON__ON_PARK_ADMIN_ZONE", 5,
+         "Administrative envelope, larger than the regulated boundary. "
+         "ON_PARKS_REGULATED is the layer with legal effect."),
     ],
 }
 
@@ -70,22 +84,10 @@ SUBTRACTION_STACK = {
 #: we know these cells exist, we just cannot say which they are, so the caveat
 #: travels with the result instead of being silently dropped.
 MISSING_ENCUMBRANCES = {
-    "ON": [
-        {"type": "conservation_reserve",
-         "note": "Ontario conservation reserves (~15,000 km², ~1.4% of the "
-                 "province) are a separate designation from provincial parks "
-                 "and are not in any harvested layer. Cells inside one will "
-                 "read as `open`. Register the LIO conservation-reserve layer "
-                 "to close this.",
-         "approx_km2": 15000},
-        {"type": "park_boundary_currency",
-         "note": "Park boundaries come from MRD126-REV1, a bedrock geology "
-                 "publication, not a parks registry — see the PROVENANCE "
-                 "WARNING in SUBTRACTION_STACK. Verified correct by hand on "
-                 "2026-08-17, but any park regulated or amended since that map "
-                 "was compiled is invisible here.",
-         "approx_km2": None},
-    ],
+    # Ontario's protected-area gap was closed on 2026-08-17 by registering the
+    # LIO layers. What remains is a question of legal interpretation, not of
+    # missing data — see PENDING_LEGAL_REVIEW.
+    "ON": [],
 }
 
 
@@ -152,6 +154,12 @@ def compute(aoi_id: str, juris: str = "ON", write: bool = True):
         print(f"    {st:<12}{n:>8,}  {100*n/total:5.1f}%")
 
     unknown_pct = 100 * counts.get("unknown", 0) / total
+    pending = PENDING_LEGAL_REVIEW.get(juris, [])
+    if pending:
+        print(f"\n  ! {len(pending)} harvested layer(s) NOT subtracted, pending "
+              f"legal review in C1.2:")
+        for lyr, n, why in pending:
+            print(f"    - {lyr.split('__')[-1]} ({n:,}): {why[:88]}…")
     missing = MISSING_ENCUMBRANCES.get(juris, [])
     if missing:
         print(f"\n  ! {len(missing)} encumbrance type(s) known-missing for {juris}:")
@@ -172,6 +180,8 @@ def compute(aoi_id: str, juris: str = "ON", write: bool = True):
                 {"state": s, "layer": l, "filter": list(f) if f else None}
                 for s, l, f in SUBTRACTION_STACK.get(juris, [])],
             "missing_encumbrances": missing,
+            "pending_legal_review": [
+                {"layer": l, "features": n, "why": w} for l, n, w in pending],
         }
         (STATE_DIR / f"{juris}__{aoi_id}.json").write_text(
             json.dumps(meta, indent=2), encoding="utf-8")

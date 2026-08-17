@@ -1,0 +1,19 @@
+[Unit]
+# One templated unit per cadence class: canada-geo-harvest@tenure.service etc.
+# The class name is the instance (%i) and maps to sources.class_of().
+Description=canada-geo-lake harvest pipeline (%i class)
+Documentation=file:///home/vis/projects/canada-geo-data-lake/plans/PLAN_C3.md
+# The bulk volume is an external drive. Without this the harvester would run
+# against an empty mount point; config.require_lake() also fails loudly, but
+# not starting at all is quieter than a daily failure alert.
+ConditionPathExists=/media/vis/Expansion/canada-geo-lake/.canada-geo-lake
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/vis/projects/canada-geo-data-lake/src
+ExecStart=/home/vis/projects/canada-geo-data-lake/.venv/bin/python -u run_class.py %i
+# Long transfers over slow provincial servers: MLAS alone runs ~45 minutes.
+TimeoutStartSec=6h
+# Be a good citizen of public-good servers even under load.
+Nice=10
+IOSchedulingClass=idle

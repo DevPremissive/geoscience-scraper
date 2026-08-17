@@ -704,3 +704,59 @@ def iter_connectors():
             yield (prov, key, spec)
     for code, spec in US_SOURCES.items():
         yield ("US", code, spec)
+
+
+# ---------------------------------------------------------------------------
+# Harvest cadence classes (PLAN_C3 3.1).
+#
+# Cadence is decision-driven, never uniform. Only TENURE runs daily, because it
+# is the one signal that cannot be reconstructed later: registries outside
+# Ontario publish current holdings only, so a day not captured is a day of
+# staked-and-dropped history permanently lost (MASTER §8).
+# ---------------------------------------------------------------------------
+
+#: Daily. The authoritative tenure product per jurisdiction.
+TENURE_CODES = {
+    # Ontario — MLAS is authoritative and regenerated daily.
+    "ON_MLAS_TENURE",
+    # British Columbia
+    "BC_MTA_CURRENT", "BC_MTO_CURRENT", "BC_MTO_HISTORIC",
+    # Yukon — including the historical register, which is the drop history
+    "YT_QUARTZ_CLAIMS", "YT_PLACER_CLAIMS", "YT_MINERAL_CLAIMS_POLY",
+    "YT_MINERAL_CLAIMS_LINE", "YT_CROWN_GRANTS", "YT_PLACER_LEASES",
+    "YT_PLACER_GROUPING", "YT_QUARTZ_GROUPING", "YT_HISTORICAL_CLAIMS",
+    # Northwest Territories & Nunavut
+    "NT_MINERAL_CLAIMS", "NU_MINERAL_CLAIMS", "NU_MINING_LEASES",
+    "NU_PROSPECTING_PERMITS",
+    # Atlantic
+    "NB_MINERAL_CLAIMS", "NS_MINERAL_RIGHTS_GDB", "NS_MINERAL_RIGHTS_SHP",
+    # SK tenure (N4) belongs here once gis.saskatchewan.ca is reachable again.
+}
+
+#: Deliberately NOT daily, with the reason, so nobody "fixes" it later.
+_TENURE_EXCLUDED = {
+    # The province labels the OGSEarth superoverlay "unofficial ... for viewing
+    # purposes only", and ON_MLAS_TENURE carries the same 401,704 claims WITH
+    # owner and dates plus the cancellation register that C0.7 diffs. Fetching
+    # these daily costs 1,514 tile requests for a fallback product. Weekly.
+    "ON_CLAIMS2", "ON_ALIENATIONS", "ON_DISPOSITIONS",
+    "ON_DISPOSITIONS_NONMINING", "ON_PLANS_PERMITS",
+    # Static since 2021-06: legacy claims and the provincial cell lattice.
+    "ON_MLAS_ADMIN",
+    # The BC cell lattice — 1.5 GB and effectively static.
+    "BC_MTA_GRID",
+}
+
+#: Monthly / on-demand. Large, slow-changing.
+RASTER_CODES = {"CGMC", "ON_GEOPHYS"}
+
+CLASSES = ("tenure", "geoscience", "rasters")
+
+
+def class_of(code: str) -> str:
+    """Cadence class for a dataset code. Anything unlisted is geoscience."""
+    if code in TENURE_CODES:
+        return "tenure"
+    if code in RASTER_CODES:
+        return "rasters"
+    return "geoscience"

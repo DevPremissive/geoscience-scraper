@@ -21,6 +21,7 @@ from urllib.request import Request, urlopen
 
 import config as C
 from discover import discover_all
+import sources as S
 from connectors import arcgis, wfs, es_scroll
 
 
@@ -183,6 +184,8 @@ def main():
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--manifest-only", action="store_true",
                     help="record what each source currently publishes, fetch nothing")
+    ap.add_argument("--class", dest="cls", choices=S.CLASSES, default=None,
+                    help="harvest one cadence class (see PLAN_C3 3.1)")
     args = ap.parse_args()
 
     C.ensure_dirs()
@@ -203,6 +206,8 @@ def main():
             pending += 1
             continue
         if only_c and r["code"].upper() not in only_c:
+            continue
+        if args.cls and S.class_of(r["code"]) != args.cls:
             continue
         fmt = r["format"]
         if fmt not in C.CORE_FORMATS and r["connector"] not in ("arcgis_layer", "arcgis_hub"):

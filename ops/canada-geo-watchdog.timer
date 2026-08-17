@@ -1,0 +1,11 @@
+[Unit]
+Description=Check canada-geo-lake harvest health
+
+[Timer]
+# A few hours after the tenure window, so a slow run is not called missing.
+OnCalendar=*-*-* 12:00:00
+Persistent=true
+Unit=canada-geo-watchdog.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,15 @@
+[Unit]
+Description=Schedule for the canada-geo-lake %i harvest class
+
+[Timer]
+# OnCalendar is set per-instance by the drop-ins below; this is the fallback.
+OnCalendar=daily
+# The archive clock is the point of this system — a run missed because the
+# machine was asleep must still happen, not be skipped until tomorrow.
+Persistent=true
+# Provincial servers should not see a nationwide fleet hit them on the minute.
+RandomizedDelaySec=20m
+Unit=canada-geo-harvest@%i.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,13 @@
+[Unit]
+Description=canada-geo-lake harvest watchdog
+Documentation=file:///home/vis/projects/canada-geo-data-lake/plans/PLAN_C3.md
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/vis/projects/canada-geo-data-lake/src
+# Deliberately NOT conditioned on the drive being mounted: an unmounted drive
+# means the harvest cannot run, which is exactly what the watchdog must report.
+ExecStart=/home/vis/projects/canada-geo-data-lake/.venv/bin/python -u run_class.py --watchdog
+# A non-zero exit means problems were found AND already alerted; that is a
+# successful watchdog run, not a failed one.
+SuccessExitStatus=0 1

@@ -91,6 +91,20 @@ def test_missing_numbers_do_not_become_zero():
     check("incomplete is flagged", s["complete"], False)
 
 
+def test_partial_is_not_reported_as_a_total():
+    """A total that omits unfilled components reads as an answer. It must not."""
+    partial = {"juris": "PARTIAL",
+               "registration_cost": {"amount": None},
+               "licence": {"cost": {}},
+               "work_requirement": [{"years": "1-N", "amount_per_unit": 400.0}]}
+    s = R.compute_schedule(partial, n_claims=10, years=5)
+    check("work is known", s["work_total"], 20000.0)
+    check("grand_total withheld while incomplete", s["grand_total"], None)
+    check("partial exposed separately", s["known_subtotal"], 20000.0)
+    check("missing components named", s["unknown_components"],
+          ["registration", "licence"])
+
+
 def test_real_ontario_refuses_until_verified():
     ok, missing = R.stakeable_now("ON")
     check("ON not stakeable while unverified", ok, False)
@@ -107,6 +121,7 @@ def main():
     for fn in [test_bands_escalate, test_open_ended_band,
                test_registration_scales_with_claims, test_licence_recurs,
                test_grand_total, test_missing_numbers_do_not_become_zero,
+               test_partial_is_not_reported_as_a_total,
                test_real_ontario_refuses_until_verified]:
         print(f"\n{fn.__name__}")
         fn()

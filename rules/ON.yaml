@@ -1,48 +1,120 @@
 # ---------------------------------------------------------------------------
 # Ontario staking rules — C1.2
 #
-# NUMBERS ARE DELIBERATELY EMPTY. PLAN_C1 1.2: "Every numeric field is filled
-# from the current regulation/fee schedule by a human at verification time —
-# the component plan deliberately ships the schema empty of numbers."
+# STATUS: DRAFTED, NOT VERIFIED.
 #
-# Until verified_by/verified_date are set by a person, stakeable_now("ON")
-# returns False and holding_schedule("ON") refuses to compute. That is intended:
-# a cost model that silently answers $0 is worse than one that declines.
+# Values below marked [SOURCED] were extracted from the regulation text fetched
+# on 2026-08-17 and are quoted in `source_quotes` so they can be checked without
+# re-reading the whole regulation. Values left null are NOT unknown-in-principle
+# — they simply are not in O. Reg. 65/18, and are noted with where to look.
+#
+# Nothing here is filled from memory. A fee asserted without a citation would
+# flow silently into every dossier's economics via C6.5 and nobody would catch
+# it, which is why PLAN_C1 1.2 ships this file empty of numbers by default.
+#
+# TO VERIFY: check each [SOURCED] value, fill the nulls, then set verified_by
+# to your name and verified_date. Until then stakeable_now("ON") returns False
+# and holding_schedule("ON") refuses to compute.
 # ---------------------------------------------------------------------------
 juris: ON
 staking_method: online_map          # MLAS; paper staking ended 2018-01-08
 unit_name: cell claim
-unit_area_ha: null                  # nominal ~17.7 ha north / ~24 ha south — CONFIRM
+
+# NOT in O. Reg. 65/18. The provincial cell grid is ~17.7 ha in the north and
+# ~24 ha in the south (MASTER §6c), and the harvested CellGrid layer carries a
+# per-cell AREA_HA column — so this can be measured from our own data rather
+# than looked up. Left null pending that check.
+unit_area_ha: null
+
+# NOT in O. Reg. 65/18 — recording/registration fees are set separately.
 registration_cost:
   amount: null
   currency: CAD
   per: cell
+
+# NOT in O. Reg. 65/18 — the prospector's licence sits in the Mining Act and
+# its own fee schedule.
 licence:
-  required: null                    # prospector's licence prerequisite — CONFIRM
+  required: null
   cost: {amount: null, per: null}
   process: null
-work_requirement:                   # assessment work; Ontario escalates with claim age
-  - {years: "1-N", amount_per_unit: null, unit: cell}
+
+# [SOURCED] O. Reg. 65/18 s.4(1). Flat per cell per year — Ontario does NOT
+# escalate with claim age, unlike the escalating-band jurisdictions the schema
+# was designed around. Boundary claims and certain converted-legacy cells are
+# $200; this file models the ordinary cell claim.
+work_requirement:
+  - {years: "1-N", amount_per_unit: 400.00, unit: cell}
+
+# NOT in O. Reg. 65/18 under that name.
 cash_in_lieu: {allowed: null, rate: null}
-credit_banking: {allowed: null, max_years_forward: null, transferable_with_claim: null}
+
+# [SOURCED] O. Reg. 65/18 s.19(2). Reserve credits may be applied to the
+# assessment year of distribution "and the five subsequent assessment years".
+# Per-allocation maxima scale with claim size — recorded in notes, not modelled.
+credit_banking:
+  allowed: true
+  max_years_forward: 5
+  transferable_with_claim: null
+
 transfer: {allowed: null, fee: null, process: null}
-expiry_mechanics: null              # anniversary dates, grace period, forfeiture timing,
-                                    # and exactly when lapsed ground reopens for staking
+
+# [SOURCED] O. Reg. 65/18 s.1, definition of "assessment year": "the one-year
+# period between the day the mining claim is registered and its first
+# anniversary date and every subsequent periods between anniversary dates".
+# Grace period, forfeiture timing and exactly when lapsed ground reopens are NOT
+# covered here and still need filling — they matter directly to C1.6 lapse watch.
+expiry_mechanics: >
+  Assessment year runs from registration to the first anniversary date, then
+  anniversary to anniversary (O. Reg. 65/18 s.1). TO CONFIRM: grace period after
+  a due date, forfeiture timing, and the interval before forfeited ground becomes
+  open for restaking.
+
 consultation_notes: null            # duty-to-consult triggers for early exploration
 exempt_lands_notes: null
+
+source_quotes:
+  work_requirement: >
+    "the following amount of money is the amount of money that is required to be
+    spent on assessment work on a mining claim each year under section 65 of the
+    Act in order to satisfy the annual units of assessment work: 1. For cell
+    claims, whether single cell claims or multi-cell claims, $400.00 for each
+    cell included in the claim, subject to paragraphs 3 and 4. 2. For boundary
+    claims, $200.00." — O. Reg. 65/18 s.4(1)
+  credit_banking: >
+    "The maximum amount of assessment work credits that may be allocated from the
+    reserve for a mining claim to one or more contiguous mining claims in any
+    assessment year is, i. $50,000.00 [boundary or 1–2 cell claim], ii.
+    $100,000.00 [3–5 cells], or iii. $150,000.00 [6–25 cells]" and credits cover
+    "the assessment year in which the distribution is made and the five
+    subsequent assessment years." — O. Reg. 65/18 s.19(2)
+
+drafted_by: claude-opus-5
+drafted_date: 2026-08-17
+drafted_from:
+  - url: https://www.ontario.ca/laws/regulation/180065
+    fetched: 2026-08-17
+    http: 200
 
 verified_by: null                   # a PERSON's name — not "human"
 verified_date: null
 source_urls:
-  - https://www.ontario.ca/page/mining-lands-administration-system-mlas
+  - https://www.ontario.ca/laws/regulation/180065      # O. Reg. 65/18 (mining claims)
   - https://www.ontario.ca/laws/statute/90m14          # Mining Act, R.S.O. 1990, c. M.14
-  - https://www.ontario.ca/laws/regulation/180065      # O. Reg. 65/18 (claims)
-  - https://www.ontario.ca/page/mining-act-fees
+  - https://www.mlas.mndm.gov.on.ca/mlas/              # MLAS (recording fees, licence)
 
-# Questions this file must settle, raised by C1.1 on 2026-08-17. All three
-# layers are harvested and available; whether each bars staking is a legal
-# question, so they are NOT currently subtracted from open ground.
+# NOTE: ontario.ca/page/mining-act-fees and .../mining-lands-administration-system-mlas
+# both returned HTTP 404 on 2026-08-17 — the fee pages have moved. The remaining
+# numbers need a current source; the regulation above does not carry them.
+
 open_questions:
+  - "Recording fee per cell, prospector's licence cost and term, cash-in-lieu rate and
+     transfer fee are not in O. Reg. 65/18 and the ontario.ca fee pages 404. Find the
+     current fee schedule."
+  - "unit_area_ha can be measured from ON__ON_MLAS_ADMIN__CellGrid_south_CSRS (AREA_HA)
+     rather than looked up — 5,216,498 cells are already loaded."
+  - "Ontario does NOT escalate assessment work with claim age ($400/cell flat). Confirm,
+     because the schema's banded work_requirement was designed for jurisdictions that do."
   - "Do Landform Conservation Areas (ON_LANDFORM_CONSERVATION, 244 features) withdraw
      land from staking, or only restrict development under the Growth Plan?"
   - "Do Municipal Parks (ON_MUNICIPAL_PARK, 388) bar staking? Ontario frequently severs

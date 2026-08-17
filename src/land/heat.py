@@ -25,6 +25,13 @@ cell that suddenly moves scores the reverse. Both are signal.
 Robust z-scores (median / MAD) rather than mean / stdev throughout: staking is
 bursty and heavy-tailed, and one 400-claim block would otherwise define the
 standard deviation and flatten everything else to zero.
+
+ONTARIO ACCEPTANCE MET (2026-08-17). PLAN_C1 1.3 requires the series to
+reproduce at least one staking rush independently verifiable from industry news.
+The top clusters resolve to named programmes by Ontario's two largest holders —
+Kenorland Exploration in 2025Q1/Q3/Q4 and Juno Corp. in 2024Q3 — and vis
+confirmed all of them against company updates. The metric is detecting real
+market events, not data artifacts.
 """
 from __future__ import annotations
 import argparse, sys

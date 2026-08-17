@@ -155,17 +155,25 @@ def compute_schedule(rules: dict, n_claims: int, years: int) -> dict:
         span = lic_per if isinstance(lic_per, (int, float)) and lic_per else 1
         lic_total = lic_amount * max(1, -(-years // int(span)))
 
-    known = [v for v in (registration, lic_total, work_total) if v is not None]
+    parts = (registration, lic_total, work_total)
+    known = [v for v in parts if v is not None]
+    complete = all(v is not None for v in parts)
     return {
         "juris": rules.get("juris"), "claims": n_claims, "years": years,
         "registration_total": registration,
         "licence_total": lic_total,
         "work_by_year": rows,
         "work_total": work_total,
-        "grand_total": sum(known) if known else None,
+        # A "grand total" that silently omits the components nobody has filled
+        # in reads as an answer. It is only reported when every component is
+        # known; otherwise the partial is labelled as a partial.
+        "grand_total": sum(known) if complete else None,
+        "known_subtotal": sum(known) if known else None,
+        "unknown_components": [n for n, v in
+                               zip(("registration", "licence", "work"), parts)
+                               if v is None],
         "currency": (rules.get("registration_cost") or {}).get("currency"),
-        "complete": all(v is not None for v in
-                        (registration, lic_total, work_total)),
+        "complete": complete,
     }
 
 

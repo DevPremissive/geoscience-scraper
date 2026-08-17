@@ -214,6 +214,80 @@ def lname_clean(name: str) -> str:
     return name.replace(" ", "_").replace("-", "_")[:62]
 
 
+#: Microsoft Access databases. Ontario ships its 95,419-borehole database as a
+#: single 244 MB .accdb with no GIS format anywhere in the archive, so without a
+#: reader the whole source lands as "RAW ONLY" and looks like a failed harvest.
+ACCESS_EXT = {".accdb", ".mdb"}
+
+#: Columns that betray an unprojected point table, and the CRS to build it in.
+#: Ontario's borehole collars carry UTM_ZONE per row — the province spans zones
+#: 15–18, so a single CRS for the table would be wrong for most of it.
+_UTM_COLS = ("UTM_ZONE", "UTM_EAST", "UTM_NORTH")
+
+
+def read_access(path) -> dict:
+    """Every user table in an Access database, as DataFrames.
+
+    Uses `access-parser`, which is pure Python: mdbtools needs root and GDAL's
+    MDB driver needs a Java bridge, neither of which should be a prerequisite
+    for reading one provincial dataset.
+    """
+    import pandas as pd
+    from access_parser import AccessParser
+
+    out = {}
+    ap = AccessParser(str(path))
+    for table in ap.catalog:
+        if table.startswith("MSys"):
+            continue
+        try:
+            data = ap.parse_table(table)
+        except Exception as e:                                  # noqa: BLE001
+            print(f"   ! access table {table}: {str(e)[:70]}", file=sys.stderr)
+            continue
+        if not data:
+            continue
+        df = pd.DataFrame(data)
+        if not df.empty:
+            out[table] = df
+    return out
+
+
+def points_from_utm(df, juris="ON"):
+    """Point GeoDataFrame from per-row UTM zone/easting/northing, or None.
+
+    The CRS is NAD83 (EPSG:269xx), which is what Ontario publishes in — asserted
+    rather than guessed: `process_one` validates the result against the
+    provincial boundary and refuses to write a layer whose points land outside.
+    """
+    import geopandas as gpd
+    import pandas as pd
+    from shapely.geometry import Point
+
+    if not all(c in df.columns for c in _UTM_COLS):
+        return None
+    d = df.copy()
+    for c in _UTM_COLS:
+        d[c] = pd.to_numeric(d[c], errors="coerce")
+    d = d.dropna(subset=list(_UTM_COLS))
+    if d.empty:
+        return None
+
+    parts = []
+    for zone, grp in d.groupby("UTM_ZONE"):
+        z = int(zone)
+        if not 7 <= z <= 22:                     # plausible Canadian UTM zones
+            continue
+        g = gpd.GeoDataFrame(
+            grp, geometry=[Point(x, y) for x, y in
+                           zip(grp["UTM_EAST"], grp["UTM_NORTH"])],
+            crs=f"EPSG:{26900 + z}")             # NAD83 / UTM zone Nz
+        parts.append(g.to_crs(4326))
+    if not parts:
+        return None
+    return gpd.GeoDataFrame(pd.concat(parts, ignore_index=True), crs=4326)
+
+
 def _layer_has_geometry(path, layer) -> bool:
     """True when a container layer carries geometry.
 
@@ -381,6 +455,34 @@ def process_one(juris, code, effective_date, files):
             merged.to_file(C.GPKG_PATH, layer=layer_name, driver="GPKG")
             print(f"   layer {layer_name:<48}{len(merged):>9}")
 
+        # Access databases: every table to Parquet, plus a point layer wherever
+        # a table carries UTM coordinates instead of geometry.
+        for adb in sorted(p for e in ACCESS_EXT for p in work.rglob(f"*{e}")):
+            try:
+                tables = read_access(adb)
+            except Exception as e:                              # noqa: BLE001
+                print(f"   ! access {adb.name}: {str(e)[:80]}", file=sys.stderr)
+                continue
+            print(f"   access {adb.name}: {len(tables)} tables")
+            for tname, df in tables.items():
+                out = C.TABLES_DIR / f"{lname_clean(f'{juris}__{code}__{tname}')}.parquet"
+                try:
+                    df.to_parquet(out, index=False)
+                except Exception:                               # noqa: BLE001
+                    # Access columns are frequently mixed-type; Parquet is not.
+                    df.astype({c: "string" for c in df.columns
+                               if df[c].dtype == object}).to_parquet(out, index=False)
+                print(f"   table {out.stem:<48}{len(df):>9}")
+
+                pts = points_from_utm(df, juris)
+                if pts is None or pts.empty:
+                    continue
+                name = lname_clean(f"{juris}__{code}__{tname}")
+                pts = pts.astype({c: "string" for c in pts.columns
+                                  if c != "geometry" and pts[c].dtype == object})
+                pts.to_file(C.GPKG_PATH, layer=name, driver="GPKG")
+                print(f"   layer {name:<48}{len(pts):>9}  (from UTM)")
+
         for tab in sorted(p for e in TAB for p in work.rglob(f"*{e}")):
             try:
                 df = (pd.read_csv(tab, low_memory=False, encoding="latin-1",
@@ -388,7 +490,16 @@ def process_one(juris, code, effective_date, files):
                       if tab.suffix in (".csv", ".tsv") else pd.read_excel(tab))
                 if df.empty:
                     continue
-                df.to_parquet(C.TABLES_DIR / f"{lname(juris,code,tab)}.parquet", index=False)
+                out = C.TABLES_DIR / f"{lname(juris,code,tab)}.parquet"
+                try:
+                    df.to_parquet(out, index=False)
+                except Exception:                               # noqa: BLE001
+                    # A spreadsheet column holding both numbers and text has no
+                    # Parquet type. Ontario's MRD283 groundwater workbook does
+                    # this in `Easting`, which failed the whole source rather
+                    # than one column. Fall back to text for the mixed ones.
+                    df.astype({c: "string" for c in df.columns
+                               if df[c].dtype == object}).to_parquet(out, index=False)
                 print(f"   table {lname(juris,code,tab):<48}{len(df):>9}")
             except Exception as e:                              # noqa: BLE001
                 print(f"   ! tab {tab.name}: {e}", file=sys.stderr)

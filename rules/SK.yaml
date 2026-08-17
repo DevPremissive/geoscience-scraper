@@ -1,0 +1,52 @@
+# ---------------------------------------------------------------------------
+# SK staking rules — C1.2
+#
+# NUMBERS ARE DELIBERATELY EMPTY. PLAN_C1 1.2: "Every numeric field is filled
+# from the current regulation/fee schedule by a human at verification time —
+# the component plan deliberately ships the schema empty of numbers."
+#
+# Until verified_by/verified_date are set by a person, stakeable_now("SK")
+# returns False and holding_schedule("SK") refuses to compute.
+#
+# The non-numeric facts below (staking method, unit, system, conversion date)
+# come from MASTER_PLAN §6c, which was verified 2026-08-13. Confirm them anyway
+# at sign-off — they drive whether ground can be acquired at all.
+# ---------------------------------------------------------------------------
+juris: SK
+staking_method: online_map
+unit_name: mineral disposition
+unit_area_ha: null
+registration_cost:
+  amount: null
+  currency: CAD
+  per: mineral disposition
+licence:
+  required: null
+  cost: {amount: null, per: null}
+  process: null
+work_requirement:
+  - {years: "1-N", amount_per_unit: null, unit: mineral disposition}
+cash_in_lieu: {allowed: null, rate: null}
+credit_banking: {allowed: null, max_years_forward: null, transferable_with_claim: null}
+transfer: {allowed: null, fee: null, process: null}
+expiry_mechanics: null
+consultation_notes: null
+exempt_lands_notes: null
+
+system: Saskatchewan Mineral Administration Registry
+converted_to_map_staking: 2012-12-06
+
+verified_by: null
+verified_date: null
+source_urls:
+  - https://www.saskatchewan.ca/business/agriculture-natural-resources-and-industry/mineral-exploration-and-mining/mineral-tenure
+  - https://publications.saskatchewan.ca/#/products/1338
+  - https://www.saskatchewan.ca/business/agriculture-natural-resources-and-industry/mineral-exploration-and-mining/mineral-tenure/fees
+
+open_questions:
+  - "MASTER §6c calls the SK system 'MARS'; sources.py records that name as wrong and
+     gives SMDI (deposit index) + SMAD (assessment files) instead. Settle the correct
+     name of the TENURE registry at sign-off."
+  - "gis.saskatchewan.ca was returning 500 SITE_NOT_INITIALIZED on 2026-08-13/17, so no
+     SK tenure is harvested yet (N4 outstanding). Rules can be verified independently of
+     that outage."

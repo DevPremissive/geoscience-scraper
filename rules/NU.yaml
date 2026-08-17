@@ -1,0 +1,44 @@
+# ---------------------------------------------------------------------------
+# NU staking rules — C1.2
+#
+# NUMBERS ARE DELIBERATELY EMPTY. PLAN_C1 1.2: "Every numeric field is filled
+# from the current regulation/fee schedule by a human at verification time —
+# the component plan deliberately ships the schema empty of numbers."
+#
+# Until verified_by/verified_date are set by a person, stakeable_now("NU")
+# returns False and holding_schedule("NU") refuses to compute.
+#
+# The non-numeric facts below (staking method, unit, system, conversion date)
+# come from MASTER_PLAN §6c, which was verified 2026-08-13. Confirm them anyway
+# at sign-off — they drive whether ground can be acquired at all.
+# ---------------------------------------------------------------------------
+juris: NU
+staking_method: online_map
+unit_name: unit claim
+unit_area_ha: null
+registration_cost:
+  amount: null
+  currency: CAD
+  per: unit claim
+licence:
+  required: null
+  cost: {amount: null, per: null}
+  process: null
+work_requirement:
+  - {years: "1-N", amount_per_unit: null, unit: unit claim}
+cash_in_lieu: {allowed: null, rate: null}
+credit_banking: {allowed: null, max_years_forward: null, transferable_with_claim: null}
+transfer: {allowed: null, fee: null, process: null}
+expiry_mechanics: null
+consultation_notes: null
+exempt_lands_notes: null
+
+system: CIRNAC Map Selection
+converted_to_map_staking: 2021-01-30
+
+verified_by: null
+verified_date: null
+source_urls:
+  - https://www.rcaanc-cirnac.gc.ca/eng/1100100027580/1610377527927
+  - https://laws-lois.justice.gc.ca/eng/regulations/SOR-2014-233/
+  - https://www.rcaanc-cirnac.gc.ca/eng/1100100027522/1610377407464

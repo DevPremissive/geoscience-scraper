@@ -1,0 +1,50 @@
+# ---------------------------------------------------------------------------
+# YT staking rules — C1.2
+#
+# NUMBERS ARE DELIBERATELY EMPTY. PLAN_C1 1.2: "Every numeric field is filled
+# from the current regulation/fee schedule by a human at verification time —
+# the component plan deliberately ships the schema empty of numbers."
+#
+# Until verified_by/verified_date are set by a person, stakeable_now("YT")
+# returns False and holding_schedule("YT") refuses to compute.
+#
+# The non-numeric facts below (staking method, unit, system, conversion date)
+# come from MASTER_PLAN §6c, which was verified 2026-08-13. Confirm them anyway
+# at sign-off — they drive whether ground can be acquired at all.
+# ---------------------------------------------------------------------------
+juris: YT
+staking_method: physical
+unit_name: quartz claim
+unit_area_ha: null
+registration_cost:
+  amount: null
+  currency: CAD
+  per: quartz claim
+licence:
+  required: null
+  cost: {amount: null, per: null}
+  process: null
+work_requirement:
+  - {years: "1-N", amount_per_unit: null, unit: quartz claim}
+cash_in_lieu: {allowed: null, rate: null}
+credit_banking: {allowed: null, max_years_forward: null, transferable_with_claim: null}
+transfer: {allowed: null, fee: null, process: null}
+expiry_mechanics: null
+consultation_notes: null
+exempt_lands_notes: null
+
+system: physical staking; online viewer is research-only
+converted_to_map_staking: never
+
+verified_by: null
+verified_date: null
+source_urls:
+  - https://yukon.ca/en/doing-business/mining/stake-mineral-claim
+  - https://laws.yukon.ca/cms/images/LEGISLATION/PRINCIPAL/2003/2003-0162/2003-0162.pdf
+  - https://yukon.ca/en/mining-fees
+
+open_questions:
+  - "Yukon never converted to map staking — claims are staked with physical posts and
+     registered within a deadline. Confirm the deadline and whether any online
+     pre-staking exists, because C1.1 open-ground output implies ground is acquirable
+     by map, which is FALSE here (MASTER §8: physical staking in YT is a standing risk)."

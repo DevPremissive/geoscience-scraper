@@ -1,0 +1,44 @@
+# ---------------------------------------------------------------------------
+# BC staking rules — C1.2
+#
+# NUMBERS ARE DELIBERATELY EMPTY. PLAN_C1 1.2: "Every numeric field is filled
+# from the current regulation/fee schedule by a human at verification time —
+# the component plan deliberately ships the schema empty of numbers."
+#
+# Until verified_by/verified_date are set by a person, stakeable_now("BC")
+# returns False and holding_schedule("BC") refuses to compute.
+#
+# The non-numeric facts below (staking method, unit, system, conversion date)
+# come from MASTER_PLAN §6c, which was verified 2026-08-13. Confirm them anyway
+# at sign-off — they drive whether ground can be acquired at all.
+# ---------------------------------------------------------------------------
+juris: BC
+staking_method: online_map
+unit_name: mineral title cell
+unit_area_ha: null
+registration_cost:
+  amount: null
+  currency: CAD
+  per: mineral title cell
+licence:
+  required: null
+  cost: {amount: null, per: null}
+  process: null
+work_requirement:
+  - {years: "1-N", amount_per_unit: null, unit: mineral title cell}
+cash_in_lieu: {allowed: null, rate: null}
+credit_banking: {allowed: null, max_years_forward: null, transferable_with_claim: null}
+transfer: {allowed: null, fee: null, process: null}
+expiry_mechanics: null
+consultation_notes: null
+exempt_lands_notes: null
+
+system: Mineral Titles Online (MTO)
+converted_to_map_staking: 2005-01-12
+
+verified_by: null
+verified_date: null
+source_urls:
+  - https://www2.gov.bc.ca/gov/content/industry/mineral-exploration-mining/mineral-titles
+  - https://www.bclaws.gov.bc.ca/civix/document/id/complete/statreg/96292_01
+  - https://www2.gov.bc.ca/gov/content/industry/mineral-exploration-mining/mineral-titles/mineral-placer-titles/fees

@@ -1,0 +1,54 @@
+# ---------------------------------------------------------------------------
+# Ontario staking rules — C1.2
+#
+# NUMBERS ARE DELIBERATELY EMPTY. PLAN_C1 1.2: "Every numeric field is filled
+# from the current regulation/fee schedule by a human at verification time —
+# the component plan deliberately ships the schema empty of numbers."
+#
+# Until verified_by/verified_date are set by a person, stakeable_now("ON")
+# returns False and holding_schedule("ON") refuses to compute. That is intended:
+# a cost model that silently answers $0 is worse than one that declines.
+# ---------------------------------------------------------------------------
+juris: ON
+staking_method: online_map          # MLAS; paper staking ended 2018-01-08
+unit_name: cell claim
+unit_area_ha: null                  # nominal ~17.7 ha north / ~24 ha south — CONFIRM
+registration_cost:
+  amount: null
+  currency: CAD
+  per: cell
+licence:
+  required: null                    # prospector's licence prerequisite — CONFIRM
+  cost: {amount: null, per: null}
+  process: null
+work_requirement:                   # assessment work; Ontario escalates with claim age
+  - {years: "1-N", amount_per_unit: null, unit: cell}
+cash_in_lieu: {allowed: null, rate: null}
+credit_banking: {allowed: null, max_years_forward: null, transferable_with_claim: null}
+transfer: {allowed: null, fee: null, process: null}
+expiry_mechanics: null              # anniversary dates, grace period, forfeiture timing,
+                                    # and exactly when lapsed ground reopens for staking
+consultation_notes: null            # duty-to-consult triggers for early exploration
+exempt_lands_notes: null
+
+verified_by: null                   # a PERSON's name — not "human"
+verified_date: null
+source_urls:
+  - https://www.ontario.ca/page/mining-lands-administration-system-mlas
+  - https://www.ontario.ca/laws/statute/90m14          # Mining Act, R.S.O. 1990, c. M.14
+  - https://www.ontario.ca/laws/regulation/180065      # O. Reg. 65/18 (claims)
+  - https://www.ontario.ca/page/mining-act-fees
+
+# Questions this file must settle, raised by C1.1 on 2026-08-17. All three
+# layers are harvested and available; whether each bars staking is a legal
+# question, so they are NOT currently subtracted from open ground.
+open_questions:
+  - "Do Landform Conservation Areas (ON_LANDFORM_CONSERVATION, 244 features) withdraw
+     land from staking, or only restrict development under the Growth Plan?"
+  - "Do Municipal Parks (ON_MUNICIPAL_PARK, 388) bar staking? Ontario frequently severs
+     surface from mining rights, so municipal surface ownership may not imply the mining
+     rights are unavailable."
+  - "Provincial Park Admin Zone (ON_PARK_ADMIN_ZONE, 5) is a larger envelope than the
+     regulated boundary. Confirm ON_PARKS_REGULATED is the layer with legal effect."
+  - "Confirm Indian Reserve (ON_INDIAN_RESERVE, 246) is correctly treated as withdrawn.
+     It IS currently subtracted as `withdrawn` in C1.1's stack."

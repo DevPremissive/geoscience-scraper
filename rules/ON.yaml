@@ -20,24 +20,27 @@ juris: ON
 staking_method: online_map          # MLAS; paper staking ended 2018-01-08
 unit_name: cell claim
 
-# NOT in O. Reg. 65/18. The provincial cell grid is ~17.7 ha in the north and
-# ~24 ha in the south (MASTER §6c), and the harvested CellGrid layer carries a
-# per-cell AREA_HA column — so this can be measured from our own data rather
-# than looked up. Left null pending that check.
-unit_area_ha: null
+# [MEASURED] From our own ON__ON_MLAS_ADMIN__CellGrid_south_CSRS layer, over a
+# 400,000-cell sample of the 5,216,498-cell provincial grid: median 21.35 ha,
+# mean 21.31, range 21.1–21.5 for the bulk. Note this contradicts MASTER §6c's
+# "17.7 ha north / 24 ha south" — the actual grid is close to uniform at ~21.3 ha.
+# Measured rather than looked up, so it is checkable against the layer.
+unit_area_ha: 21.35
 
-# NOT in O. Reg. 65/18 — recording/registration fees are set separately.
+# [SOURCED] Fee schedule item 1.
 registration_cost:
-  amount: null
+  amount: 50.00
   currency: CAD
   per: cell
 
-# NOT in O. Reg. 65/18 — the prospector's licence sits in the Mining Act and
-# its own fee schedule.
+# [SOURCED] Fee schedule item 3 — note the 5-YEAR term, so the licence recurs
+# once per five years across a holding horizon, not annually.
 licence:
-  required: null
-  cost: {amount: null, per: null}
-  process: null
+  required: true
+  cost: {amount: 40.00, per: 5}
+  process: >
+    Purchased and renewed electronically through MLAS; a valid prospector's
+    licence is a prerequisite to registering a mining claim.
 
 # [SOURCED] O. Reg. 65/18 s.4(1). Flat per cell per year — Ontario does NOT
 # escalate with claim age, unlike the escalating-band jurisdictions the schema
@@ -46,8 +49,18 @@ licence:
 work_requirement:
   - {years: "1-N", amount_per_unit: 400.00, unit: cell}
 
-# NOT in O. Reg. 65/18 under that name.
-cash_in_lieu: {allowed: null, rate: null}
+# [SOURCED] "Payment in place" is Ontario's term. Allowed, but hedged about with
+# restrictions that matter to a holding strategy: it cannot run two years
+# running, so it buys one year of relief and not a way to sit on ground
+# indefinitely. Rate is the current year's required work, i.e. $400/cell.
+cash_in_lieu:
+  allowed: true
+  rate: 400.00                      # equal to the current year's required work
+  restrictions:
+    - "Cannot exceed the required amount to keep the claim for the current year"
+    - "Only after the first unit of required assessment work has been fulfilled"
+    - "Only for the current assessment year"
+    - "Cannot be made for two consecutive years on the same claim"
 
 # [SOURCED] O. Reg. 65/18 s.19(2). Reserve credits may be applied to the
 # assessment year of distribution "and the five subsequent assessment years".
@@ -57,7 +70,17 @@ credit_banking:
   max_years_forward: 5
   transferable_with_claim: null
 
-transfer: {allowed: null, fee: null, process: null}
+# PARTIALLY SOURCED. The fee schedule has NO line item for transferring a mining
+# CLAIM. Item 8 ($100 + HST) is consent to transfer a mining LEASE or licence of
+# occupation, which is a different instrument. Item 15 ($20 per mining claim) is
+# "recording an agreement, power of attorney, writ of execution or any other
+# instrument affecting a mining claim" and is the plausible candidate — but
+# reading it as the claim-transfer fee is an interpretation, not a citation, so
+# it is left null.
+transfer:
+  allowed: null
+  fee: null
+  process: null
 
 # [SOURCED] O. Reg. 65/18 s.1, definition of "assessment year": "the one-year
 # period between the day the mining claim is registered and its first
@@ -81,6 +104,22 @@ source_quotes:
     claims, whether single cell claims or multi-cell claims, $400.00 for each
     cell included in the claim, subject to paragraphs 3 and 4. 2. For boundary
     claims, $200.00." — O. Reg. 65/18 s.4(1)
+  registration_cost: >
+    "1. For the registration of a mining claim, per cell. $50.00 No tax"
+    — Administrative Fees for Mining Lands, item 1
+  licence: >
+    "3. For a prospector's licence, under subsection 19(1), or a renewal of
+    prospector's licence under subsection 21(1) (5 year term). $40.00 No tax"
+    — Administrative Fees for Mining Lands, item 3
+  cash_in_lieu: >
+    "In certain circumstances, a claim holder may make a payment in place of
+    performing assessment work required for a mining claim." … "A payment in
+    place cannot exceed the required amount to keep the mining claim for the
+    current year." … "Payment in place can only be made after the first unit of
+    required assessment work has been fulfilled" … "can only be made for the
+    current assessment year" … "A payment cannot be made for two consecutive
+    years on the mining claim."
+    — Assessment Work: Allocating Credits, Applying Credits and Making Payment in Place
   credit_banking: >
     "The maximum amount of assessment work credits that may be allocated from the
     reserve for a mining claim to one or more contiguous mining claims in any
@@ -95,6 +134,20 @@ drafted_from:
   - url: https://www.ontario.ca/laws/regulation/180065
     fetched: 2026-08-17
     http: 200
+    note: O. Reg. 65/18 — assessment work amounts, credit reserve, assessment year
+  - url: https://www.geologyontario.mndm.gov.on.ca/mines/lands/mining-sequence/fee_schedule_en.pdf
+    fetched: 2026-08-17
+    http: 200
+    note: >
+      "Administrative Fees for Mining Lands" — 21 line items. Printed on the
+      document: "Fees come into effect, April 10, 2018 / Updated: April 1, 2026",
+      so this is the current schedule.
+  - url: https://www.geologyontario.mndm.gov.on.ca/mines/lands/policies/assessment_work-credits_e.html
+    fetched: 2026-08-17
+    http: 200
+    note: payment-in-place rules
+  - url: https://www.mndm.gov.on.ca/en/mines-and-minerals/mlas/directive2-obtain-or-renew-prospectors-licence
+    note: MLAS Directive 2 — prospector's licence is required to register a claim
 
 verified_by: null                   # a PERSON's name — not "human"
 verified_date: null
@@ -104,15 +157,21 @@ source_urls:
   - https://www.mlas.mndm.gov.on.ca/mlas/              # MLAS (recording fees, licence)
 
 # NOTE: ontario.ca/page/mining-act-fees and .../mining-lands-administration-system-mlas
-# both returned HTTP 404 on 2026-08-17 — the fee pages have moved. The remaining
-# numbers need a current source; the regulation above does not carry them.
+# both 404 as of 2026-08-17. The live schedule is the geologyontario.mndm.gov.on.ca
+# PDF cited above, which carries its own "Updated: April 1, 2026" stamp.
 
 open_questions:
-  - "Recording fee per cell, prospector's licence cost and term, cash-in-lieu rate and
-     transfer fee are not in O. Reg. 65/18 and the ontario.ca fee pages 404. Find the
-     current fee schedule."
-  - "unit_area_ha can be measured from ON__ON_MLAS_ADMIN__CellGrid_south_CSRS (AREA_HA)
-     rather than looked up — 5,216,498 cells are already loaded."
+  - "TRANSFER of a mining claim: the fee schedule has no line item for it. Item 8 is
+     lease transfer ($100+HST); item 15 is $20 per claim for recording an instrument
+     affecting a claim. Confirm which applies, or whether an MLAS claim transfer is
+     free."
+  - "EXPIRY MECHANICS still incomplete: the assessment-year definition is sourced, but
+     grace period after a due date, forfeiture timing and the interval before forfeited
+     ground reopens for staking are not on the pages fetched. These drive C1.6 lapse
+     watch directly — a lapse alert is worthless if the reopening interval is wrong."
+  - "unit_area_ha 21.35 is MEASURED from our own CellGrid layer and CONTRADICTS
+     MASTER §6c's '17.7 ha north / 24 ha south'. The grid is near-uniform at ~21.3 ha.
+     Confirm which is right; §6c may be describing the pre-2018 legacy claim sizes."
   - "Ontario does NOT escalate assessment work with claim age ($400/cell flat). Confirm,
      because the schema's banded work_requirement was designed for jurisdictions that do."
   - "Do Landform Conservation Areas (ON_LANDFORM_CONSERVATION, 244 features) withdraw

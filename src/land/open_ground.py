@@ -48,6 +48,14 @@ SUBTRACTION_STACK = {
         ("withdrawn", "ON__ON_MLAS_TENURE__Mining_Land_Tenure",        None),
         ("withdrawn", "ON__ON_MLAS_TENURE__Non_Mining_Land_Tenure",    None),
         ("withdrawn", "ON__ON_MLAS_TENURE__Plans_Permits",             None),
+        # PROVENANCE WARNING. This is not a parks registry — it is basemap
+        # furniture inside MRD126-REV1, the 1:250 000 bedrock geology map, so it
+        # is a snapshot from whenever that map was compiled and nothing about it
+        # tracks park regulation. Hand-verification on 2026-08-17 confirmed it is
+        # currently correct AND that MLAS does not expose parks as a selectable
+        # layer at all, so this is the only park data in the system. A park
+        # regulated since MRD126 would leave its ground reading `open`. Replace
+        # with the LIO protected-areas layer before any dossier ships.
         ("park",      "ON__ON_GEOL_BEDROCK__PROVINCIALPARK",           None),
         # 2,525 of this layer's 2,532 rows are "Geographic Township, Improved"
         # covering 358,928 km² — a third of Ontario. Unfiltered it would report
@@ -70,6 +78,13 @@ MISSING_ENCUMBRANCES = {
                  "read as `open`. Register the LIO conservation-reserve layer "
                  "to close this.",
          "approx_km2": 15000},
+        {"type": "park_boundary_currency",
+         "note": "Park boundaries come from MRD126-REV1, a bedrock geology "
+                 "publication, not a parks registry — see the PROVENANCE "
+                 "WARNING in SUBTRACTION_STACK. Verified correct by hand on "
+                 "2026-08-17, but any park regulated or amended since that map "
+                 "was compiled is invisible here.",
+         "approx_km2": None},
     ],
 }
 
@@ -141,8 +156,8 @@ def compute(aoi_id: str, juris: str = "ON", write: bool = True):
     if missing:
         print(f"\n  ! {len(missing)} encumbrance type(s) known-missing for {juris}:")
         for m in missing:
-            print(f"    - {m['type']} (~{m['approx_km2']:,} km²): cells inside "
-                  f"one currently read as `open`")
+            extent = f" (~{m['approx_km2']:,} km²)" if m.get("approx_km2") else ""
+            print(f"    - {m['type']}{extent}: {m['note'][:96]}…")
 
     if write:
         STATE_DIR.mkdir(parents=True, exist_ok=True)

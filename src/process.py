@@ -29,6 +29,59 @@ def latest(code_dir):
     return max(snaps, default=None, key=lambda p: p.name) if snaps else None
 
 
+#: Written by harvest.py into each snapshot directory: every resource the run
+#: discovered for that source, fetched or skipped. Its absence means the
+#: snapshot predates the manifest and cannot be pruned against.
+RUN_MANIFEST = "_manifest.json"
+
+
+def resolve_snapshot(code_dir):
+    """Compose the source's current state by overlaying its dated snapshots.
+
+    A snapshot directory is a **delta, not a complete copy**: `harvest.py` only
+    writes files whose content changed, so an unchanged tile stays in whichever
+    older snapshot last carried it. Taking the newest directory alone therefore
+    reads a fraction of the source — Ontario's 2026-06-13 held 164 of 355 claim
+    tiles, which is how every Ontario tenure count in this lake came to be
+    derived from 46% of the province (audit I12). Under C3.1's daily cadence a
+    day with twenty changed tiles would rebuild the province from twenty tiles.
+
+    Overlay oldest-to-newest so a newer version of a file wins, then prune
+    against the newest run manifest so resources the publisher has withdrawn do
+    not persist forever — an overlay alone cannot express a deletion. Snapshots
+    written before run manifests existed simply are not pruned.
+
+    Returns `(effective_date, {relative_name: path})`, empty if nothing exists.
+    """
+    snaps = sorted((p for p in code_dir.iterdir() if p.is_dir()), key=lambda p: p.name)
+    if not snaps:
+        return None, {}
+
+    files: dict[str, Path] = {}
+    for snap in snaps:                       # oldest first — newest wins
+        for f in snap.rglob("*"):
+            if f.is_file() and f.name != RUN_MANIFEST:
+                files[str(f.relative_to(snap))] = f
+
+    # Prune to what the most recent run that recorded a manifest still saw.
+    for snap in reversed(snaps):
+        mf = snap / RUN_MANIFEST
+        if not mf.exists():
+            continue
+        try:
+            current = set(json.loads(mf.read_text(encoding="utf-8"))["files"])
+        except Exception:                                       # noqa: BLE001
+            break
+        dropped = [k for k in files if k not in current and k != "_source.json"]
+        for k in dropped:
+            del files[k]
+        if dropped:
+            print(f"   … {len(dropped)} withdrawn resource(s) pruned from the overlay")
+        break
+
+    return snaps[-1].name, files
+
+
 # ZIP-based formats the loaders below read directly. Extracting these breaks them.
 ZIP_NATIVE = {".kmz", ".xlsx", ".xls", ".docx", ".qgz"}
 
@@ -57,8 +110,12 @@ def is_zip(path) -> bool:
         return False
 
 
-def expand(snapshot, work):
-    """Copy a snapshot aside and unpack every archive in it, whatever it is named.
+def expand(files, work):
+    """Materialise the resolved file set aside and unpack every archive in it.
+
+    Takes the `{relative_name: path}` map from `resolve_snapshot()` rather than a
+    single directory, because the current state of a source is composed from
+    several dated snapshots.
 
     Sniffs content, not extension. Québec ships ZIPs named .gpkg/.shp/.fgdb and
     Nova Scotia one named .gdb — 46 archives across four provinces that the old
@@ -66,7 +123,11 @@ def expand(snapshot, work):
     absent from geo.gpkg. GDAL dispatches on extension, so these must be unpacked
     here or they stay unreadable downstream.
     """
-    shutil.copytree(snapshot, work, dirs_exist_ok=True)
+    work.mkdir(parents=True, exist_ok=True)
+    for rel, src in files.items():
+        dst = work / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
     for _ in range(MAX_EXPAND_PASSES):
         if not _expand_pass(work):
             break
@@ -229,10 +290,10 @@ def same_layer(a, b) -> bool:
                  .geom_equals(b.geometry.reset_index(drop=True)).all())
 
 
-def process_one(juris, code, snapshot):
-    print(f"\n[{juris}/{code}] {snapshot.name}")
+def process_one(juris, code, effective_date, files):
+    print(f"\n[{juris}/{code}] {effective_date}  ({len(files)} files)")
     with tempfile.TemporaryDirectory() as td:
-        work = expand(snapshot, Path(td) / "w")
+        work = expand(files, Path(td) / "w")
         # `.gdb`/`.fgdb` sit above `.shp`: a File Geodatabase is a *directory*,
         # it carries richer types than a shapefile, and where a vendor ships both
         # (Nova Scotia) they hold the same data. Without them here, an extracted
@@ -371,9 +432,9 @@ def main():
         for cdir in sorted(p for p in jdir.iterdir() if p.is_dir()):
             if only_c and cdir.name.upper() not in only_c:
                 continue
-            snap = latest(cdir)
-            if snap:
-                process_one(jdir.name, cdir.name, snap)
+            eff, files = resolve_snapshot(cdir)
+            if files:
+                process_one(jdir.name, cdir.name, eff, files)
     print(f"\nDone. {C.GPKG_PATH}")
 
 

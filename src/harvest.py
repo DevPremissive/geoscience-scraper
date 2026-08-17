@@ -181,6 +181,8 @@ def main():
     ap.add_argument("--jurisdiction", nargs="*", default=None)
     ap.add_argument("--only", nargs="*", default=None)
     ap.add_argument("--force", action="store_true")
+    ap.add_argument("--manifest-only", action="store_true",
+                    help="record what each source currently publishes, fetch nothing")
     args = ap.parse_args()
 
     C.ensure_dirs()
@@ -193,6 +195,8 @@ def main():
 
     inv = discover_all(only_j)
     fetched = skipped = failed = pending = 0
+    #: (jurisdiction, code) -> filenames this run discovered, fetched or not.
+    discovered: dict = {}
 
     for r in inv:
         if not r.get("url"):
@@ -204,18 +208,26 @@ def main():
         if fmt not in C.CORE_FORMATS and r["connector"] not in ("arcgis_layer", "arcgis_hub"):
             continue
 
+        fname = (r["resource_name"] or r["resource_id"] or "data").replace("/", "_")
+        fname = C.safe_filename(fname)
+        if needs_extension(fname, fmt):
+            fname += f".{fmt}"
+        dest = C.RAW_DIR / r["jurisdiction"] / r["code"] / today / fname
+
+        # Record every resource this run saw, before any skip decision. The
+        # run manifest is what lets process.py tell "unchanged, still published"
+        # from "withdrawn by the publisher" when it overlays dated snapshots —
+        # a skipped resource is still a current one and must not be pruned.
+        discovered.setdefault((r["jurisdiction"], r["code"]), set()).add(fname)
+        if args.manifest_only:
+            continue
+
         prev = last_known(con, r["resource_id"] or r["url"])
         if (prev and not args.force and prev[1]
                 and prev[1] == (r.get("last_modified") or "")
                 and payload_present(prev)):
             skipped += 1
             continue
-
-        fname = (r["resource_name"] or r["resource_id"] or "data").replace("/", "_")
-        fname = C.safe_filename(fname)
-        if needs_extension(fname, fmt):
-            fname += f".{fmt}"
-        dest = C.RAW_DIR / r["jurisdiction"] / r["code"] / today / fname
         # Stage every download beside its destination. Nothing is written to
         # `dest` until the content is known-good and known-wanted, so a skip or a
         # failure can never delete a file the manifest already points at.
@@ -304,6 +316,18 @@ def main():
         fetched += 1
         print(f"  + {r['jurisdiction']:<6}{r['code']:<22}{fmt:<7}{size/1e6:7.1f}MB{extra}")
         time.sleep(C.REQUEST_GAP)
+
+    # A run manifest per source, so process.py can distinguish a resource that
+    # simply did not change from one the publisher has withdrawn. Only written
+    # for a full run of that source — with --only the inventory is filtered and
+    # the manifest would claim the rest of the source no longer exists.
+    if not only_c:
+        for (juris, code), names in discovered.items():
+            snap = C.RAW_DIR / juris / code / today
+            snap.mkdir(parents=True, exist_ok=True)
+            (snap / "_manifest.json").write_text(
+                json.dumps({"date": today, "run_finished": now,
+                            "files": sorted(names)}, indent=2), encoding="utf-8")
 
     con.close()
     print(f"\nDone. fetched={fetched} skipped={skipped} failed={failed} "

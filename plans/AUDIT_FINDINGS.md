@@ -1017,6 +1017,78 @@ duplicate check rather than holding frames for comparison. Sized at roughly half
 Gate G0 items still open after this pass: 0.4 rasters, 0.5 fabric, 0.6 feature store,
 0.7 `tenure_events`, 0.8 `COVERAGE.md` rewrite, and C3.1/C3.6.
 
+## J. Phase 1 / C1 build state (2026-08-17)
+
+C1 is built end to end on Ontario. What follows is the state a next session needs,
+including the things that are deliberately not finished.
+
+| Component | State | Artifact |
+|---|---|---|
+| 1.1 open ground | **acceptance PASSED** (15/15 hand-verified) | `processed/land_state/` |
+| 1.2 rules table | built; ON drafted from primary sources, **awaiting signature** | `rules/*.yaml` |
+| 1.3 heat | **acceptance PASSED** (rushes confirmed against company updates) | `processed/heat.parquet` |
+| 1.4 ownership graph | built; review queue 135 (target <200) | `processed/ownership.duckdb` |
+| 1.5 criticality | built; 12,056 pairs, every score self-explaining | `processed/criticality.parquet` |
+| 1.6 lapse watch | built; 83 alerts, refuses to say "stakeable" | `processed/lapse_watch.parquet` |
+
+### J1 — Bugs found by building C1, all in earlier components
+
+Each was found by looking at output rather than by re-reading code, and each had
+already produced a wrong number that nobody would have questioned.
+
+1. **The Ontario staking series was inverted.** C0.7 took `staked` events only from the
+   cancellation register — claims that have *ended* — so every recently staked, still-live
+   claim was missing. The series reported ~2,000 claims staked across 2025 against an actual
+   **89,466**. Ontario's biggest staking year read as its quietest. Fixed by reading both
+   registers; events 1.21 M → 1.59 M.
+2. **Holder parsing dropped every name containing a comma.** `parse_holder` split
+   multi-holder strings on any comma, so `"(100) VCC RESOURCES, INC."` and surname-first
+   people fell through unparsed and entered the ownership graph with the percentage prefix
+   baked into the name. Split now happens on a comma *followed by* a parenthesised number.
+3. **`heat_self` ranged to 2×10¹⁵** — robust z-scores dividing by a MAD of ~1e-15 from float
+   noise, and scoring cells with one quarter of "history". Guarded by a minimum observation
+   count and a relative scale floor.
+4. **`tenure_events` had no location**, so no event could be assigned to a cell. Every event
+   now carries `cell_r7`.
+
+### J2 — Two structural mistakes worth remembering
+
+**Scoring on the wrong population.** C1.6's first run returned zero alerts. Criticality is
+scored on *open* ground; an expiring claim sits on *claimed* ground, so its own cell could
+never match — 100% of scored cells were open cells. Zero was a real signal, not a quiet
+success. The fix checks r9 neighbours, because what matters is whether the ground a claim
+would *release* adjoins ground a neighbour is already reaching for.
+
+**Using the newest window because it is newest.** Heat's top decile was computed from the
+latest quarter, which is *partial* — the harvest lands mid-quarter — making it the least
+representative window available. It produced 142 hot cells overlapping none of the 882 cells
+holding claims due within 30 days. Now a trailing 4-quarter maximum.
+
+### J3 — Entity resolution: precision was never the risk
+
+Of the first 19 near-matches, most were **false**: `MICHAEL JAMES GOODMAN` vs `MICHAEL JAMES
+GORDON` at 0.960 are different people, and numbered companies differ only by digits so
+`1001061522` vs `1001291605` scores 0.954 by construction. Auto-merging on similarity would
+have produced buyer analysis about companies that do not exist.
+
+But recall was the real gap. String similarity **missed** the pair known to be real:
+`KENORLAND EXPLORATION` vs `KENORLAND MINERALS NORTH AMERICA` scores **0.851**, because the
+strings diverge completely after the first word — the ordinary shape of a corporate family.
+Candidates now also come from a shared rare leading token, restricted to non-individuals
+after the first attempt surfaced dozens of `AARON`/`ALLAN` pairs.
+
+### J4 — What is deliberately unfinished
+
+- **`rules/ON.yaml` is unsigned**, so `stakeable_now("ON")` is False and
+  `holding_schedule()` refuses. Four fees are sourced and quoted; the transfer fee and the
+  **grace period / forfeiture timing / reopening interval** are not, and the latter is a hard
+  dependency for C1.6 rather than paperwork.
+- **`unit_area_ha` measured 21.35 ha** from our own CellGrid layer, contradicting §6c's
+  "17.7 ha north / 24 ha south". §6c may describe pre-2018 legacy claims. Unsettled.
+- **C1.4 and C1.5 acceptances need a human** — property outlines against corporate
+  presentations, and top-5 critical cells against a landman's judgement.
+- **C1.6 acceptance needs two weeks** of daily runs, which began 2026-08-17.
+
 ---
 
 ## Change log

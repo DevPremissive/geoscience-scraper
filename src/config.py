@@ -43,6 +43,17 @@ PDF_DIR       = LAKE_ROOT / "pdfs"       # pdfs/<JURISDICTION>/<CODE>/<id>.pdf
 PROCESSED_DIR = LAKE_ROOT / "processed"
 TABLES_DIR    = PROCESSED_DIR / "tables"
 GPKG_PATH     = PROCESSED_DIR / "geo.gpkg"
+MARKET_DIR    = PROCESSED_DIR / "market"  # C6 economics: issuers, buyers, comps
+
+# The SEDAR+ filing corpus already captured by the sibling `mining-scraper`
+# project. C6 reads it READ-ONLY and over the local filesystem only — no network
+# call is made to SEDAR+ from this repo, so this repo cannot trip the anti-bot
+# posture that project maintains. Override with CANADA_GEO_SEDAR_CORPUS.
+SEDAR_CORPUS = Path(os.environ.get(
+    "CANADA_GEO_SEDAR_CORPUS",
+    str(Path.home() / "projects" / "mining-scraper")))
+SEDAR_INDEX_DIR = SEDAR_CORPUS / "Downloads"          # one filing-index CSV per issuer
+SEDAR_UNIVERSE  = SEDAR_CORPUS / "data" / "mining_universe_companies.csv"
 
 LOG_DIR       = INDEX_ROOT / "logs"
 MANIFEST_DB   = INDEX_ROOT / "manifest.sqlite"

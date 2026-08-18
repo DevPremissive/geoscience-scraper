@@ -149,6 +149,24 @@ drafted_from:
   - url: https://www.mndm.gov.on.ca/en/mines-and-minerals/mlas/directive2-obtain-or-renew-prospectors-licence
     note: MLAS Directive 2 — prospector's licence is required to register a claim
 
+# vis accepted the four sourced fee values on 2026-08-17 — registration $50/cell,
+# prospector's licence $40 per 5-year term, payment in place $400/cell, and
+# assessment work $400/cell/yr. That acceptance is recorded here so the
+# provenance is real and durable.
+#
+# `verified_by` remains null ON PURPOSE. It attests to the WHOLE file, and
+# `consultation_notes` and `exempt_lands_notes` are still empty — duty-to-consult
+# triggers and exempt lands are legal content nobody has reviewed. Signing now
+# would assert that a person had checked material they have not seen, on the one
+# file whose entire job is to be trustworthy about legal prerequisites.
+fees_accepted_by: vis
+fees_accepted_date: 2026-08-17
+fees_accepted_scope:
+  - registration_cost
+  - licence
+  - cash_in_lieu
+  - work_requirement
+
 verified_by: null                   # a PERSON's name — not "human"
 verified_date: null
 source_urls:

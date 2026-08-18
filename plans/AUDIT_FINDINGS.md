@@ -1089,6 +1089,72 @@ after the first attempt surfaced dozens of `AARON`/`ALLAN` pairs.
   presentations, and top-5 critical cells against a landman's judgement.
 - **C1.6 acceptance needs two weeks** of daily runs, which began 2026-08-17.
 
+## K. C2 build findings (2026-08-17)
+
+### K1 — The C2.1 corpus is not made of what the plan says
+
+PLAN_C2 2.1 names two corpus pillars. Neither survived checking, making this the **third**
+corpus premise in this project to fail on contact with the data.
+
+| Plan says | Reality |
+|---|---|
+| "CGMC legend GPKG unit descriptions" | A QGIS style file. 34 entries, class NAMES averaging 12 characters (audit I6) |
+| "MRDS free-text fields (304,632 records)" | 87% United States. **1,551 Canadian records**, `dep_type` populated on 125, `ore_ctrl` on 89 |
+
+What does exist is provincial bedrock attribute text, chosen by measuring average populated
+length per column rather than by reading field names:
+
+```
+BC  unit_desc            ~137 chars/feature
+ON  ROCKTYPE_P            ~84   "Kaolinitic clay, clay, sand, lignite"
+QC  NOM_ETQT_LITH         ~62   (plus an English variant)
+ON  UNITNAME_P            ~34   "Foliated tonalite suite"
+```
+
+That is the corpus: 164,577 Ontario cells, 100% fabric coverage, median 179 characters.
+Thinner than the plan assumed and genuinely usable. **QC label fields carry font markup**
+(`<FNT name='SIGEOM2010_STRA_10p5'>`) which must be stripped — embedding presentation markup
+would spend the model's 512-token budget on font names.
+
+### K2 — The embedding limit is tokens, so a fixed chunk size cannot be safe
+
+D4 measured "≤ ~2,687 chars, HTTP 500 beyond ~2,781". Measured again with different text,
+2,000 characters embed and **2,600 fail**. Both are right: the limit is ~512 *tokens*, and
+prose tokenizes differently from comma-separated lithology lists. Chunking therefore uses a
+conservative 1,200 characters *and* halves any chunk the server still rejects — the same
+adaptive shape the ArcGIS pager and the resumable download needed. 6% of Ontario documents
+exceed one chunk; the longest is 10,336 characters and splits into 9.
+
+### K3 — Ontario is the wrong jurisdiction for the Zn-Pb MVT answer key
+
+2.1 says to start with Zn-Pb MVT "solely because two published Canadian studies used it —
+giving an external answer key". The reasoning is sound; the jurisdiction is not.
+
+```
+Ontario occurrences   gold 7,011   zinc AND lead 765
+past/producing        gold   415   zinc AND lead  95
+```
+
+and Ontario is not an MVT province — Canadian MVT is Pine Point (NWT), Nanisivik and Polaris
+(NU), Gays River (NS). Training MVT here would fit a few hundred labels of a deposit type
+the province does not host, and the published answer key would not transfer to the result.
+Phase 1 runs **orogenic Au**, which 2.1 itself names as the second system and calls
+"business-relevant, label-rich": 6,775 occurrences → 3,749 positive cells (2.28%). Zn-Pb MVT
+is retained in `labels.SYSTEMS` for when an MVT jurisdiction is in scope.
+
+### K4 — Hole-type filtering removes 17% of the drillhole population
+
+C2.4 calls filtering by hole type a correctness requirement rather than a refinement, and
+the numbers justify the wording. Ontario's OMEIS layer holds 135,239 diamond drill holes
+alongside 12,792 overburden auger, 11,264 sonic, 5,745 percussion and 6,332 underground —
+**29,801 holes, 17%, that never tested bedrock as an exploration hole would**. An auger hole
+that found no gold is not evidence that no gold is there.
+
+After the full chain — hole type, no occurrence within 500 m, no follow-up hole, no restaking
+within 7 years — 47,450 tier-1 negatives remain. Only **20% carry known commodities tested**;
+the rest are (location, depth) with commodities unknown, which is a materially weaker
+negative and is recorded as such rather than treated as "tested for everything".
+
 ---
 
 ## Change log

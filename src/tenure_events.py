@@ -80,7 +80,14 @@ ON_ADMIN_STATUSES = {"Amalgamated", "Merged", "Leased", "Active",
 
 #: `(49) STILLWATER CRITICAL MINERALS CORP., (51) Heritage Mining Ltd.`
 #: Operational claims: the leading number IS the ownership percentage.
-_PCT_PREFIX = re.compile(r"\((\d{1,3}(?:\.\d+)?)\)\s*([^,]+?)(?=\s*,\s*\(|\s*$)")
+#:
+#: Holders are split on a comma FOLLOWED BY a parenthesised number, not on any
+#: comma. Splitting on commas dropped every holder whose own name contains one —
+#: "(100) VCC RESOURCES, INC." and "(100) SMITH, JOHN" both fell through
+#: unparsed and kept their percentage prefix as part of the name, which then
+#: propagated into the ownership graph as a distinct entity.
+_HOLDER_SPLIT = re.compile(r",\s*(?=\(\d)")
+_PCT_PREFIX = re.compile(r"^\((\d{1,3}(?:\.\d+)?)\)\s*(.+?)\s*$")
 #: `(408864) JEAN MARC GAUDREAU (100%)`
 #: Cancelled claims: the leading number is a CLIENT ID and the percentage is a
 #: trailing `(N%)`. Parsing this with the rule above would read client 408864 as
@@ -100,9 +107,17 @@ def parse_holder(value) -> list:
     hits = _ID_AND_PCT.findall(value)
     if hits:
         return [(name.strip(), float(pct), cid) for cid, name, pct in hits]
-    hits = _PCT_PREFIX.findall(value)
-    if hits:
-        return [(name.strip(), float(pct), None) for pct, name in hits]
+    parts = _HOLDER_SPLIT.split(value)
+    out, matched = [], False
+    for part in parts:
+        m = _PCT_PREFIX.match(part.strip())
+        if m:
+            matched = True
+            out.append((m.group(2).strip(), float(m.group(1)), None))
+        elif part.strip():
+            out.append((part.strip(), None, None))
+    if matched:
+        return out
     return [(value.strip(), None, None)]
 
 

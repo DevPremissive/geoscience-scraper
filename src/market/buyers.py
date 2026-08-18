@@ -62,6 +62,18 @@ REGISTERS = {
            "ISSUE_DATE", "TERMINATIO"),
 }
 
+#: First tokens too common to identify a corporate family. A shared "GOLD" says
+#: nothing; a shared "KENORLAND" says a great deal.
+_GENERIC_TOKENS = {
+    "GOLD", "SILVER", "COPPER", "NICKEL", "LITHIUM", "URANIUM", "ZINC", "IRON",
+    "CANADA", "CANADIAN", "NORTH", "NORTHERN", "SOUTH", "SOUTHERN", "EAST",
+    "WEST", "WESTERN", "EASTERN", "NEW", "GREAT", "GRAND", "ROYAL", "FIRST",
+    "PACIFIC", "ATLANTIC", "AMERICAN", "GLOBAL", "INTERNATIONAL", "UNITED",
+    "MINING", "MINERALS", "MINERAL", "RESOURCES", "RESOURCE", "EXPLORATION",
+    "METALS", "METAL", "MINES", "MINE", "ENERGY", "VENTURES", "CAPITAL",
+    "ONTARIO", "QUEBEC", "SUPERIOR", "LAKE", "RED", "GREEN", "BLUE", "WHITE",
+}
+
 #: Percentile of province-wide pickup volume above which a party is treated as a
 #: consolidator. Set from the observed distribution, not from a prior.
 CONSOLIDATOR_PCTILE = 0.90
@@ -141,6 +153,13 @@ def pickups(juris: str = "ON", write: bool = True):
     return out
 
 
+#: Largest holders in the jurisdiction are seeded regardless of adjacency. C6.2's
+#: acceptance names the Phase-1 Ontario stories, and criticality alone would not
+#: reach them: it is computed on the screened AOI, so a major holder whose ground
+#: happens not to border a screened cell would have no profile at all.
+MAJOR_HOLDER_TOP_N = 25
+
+
 def _seed(juris: str):
     """Owners whose position our candidate ground touches.
 
@@ -174,6 +193,18 @@ def _seed(juris: str):
     lw_names = {normalize(n) for n in lw["owner"].dropna()}
     seed["on_lapse_watch"] = seed["name_raw"].map(
         lambda n: normalize(n) in lw_names)
+
+    major = owners.sort_values("claims", ascending=False).head(MAJOR_HOLDER_TOP_N)
+    major = major[~major["owner_id"].isin(set(seed["owner_id"]))].copy()
+    if len(major):
+        for c in ("critical_cells", "max_criticality", "mean_criticality",
+                  "blocks_at_risk"):
+            major[c] = 0.0
+        major["why_tracked"] = "major_holder"
+        major["on_lapse_watch"] = major["name_raw"].map(
+            lambda n: normalize(n) in lw_names)
+        seed = pd.concat([seed, major], ignore_index=True)
+        print(f"  + {len(major)} major holder(s) with no critical cell of their own")
 
     ba = blocks.groupby("owner_id").agg(
         n_blocks=("block_id", "nunique"),
@@ -222,6 +253,24 @@ def _resolve(seed, issuers):
                          "candidate_issuer_id": lookup[best],
                          "similarity": round(score, 4),
                          "reason": "normalized near-match, NOT auto-merged"})
+            continue
+        # Second channel: a shared distinctive first token. The C1.3 rush split
+        # across `KENORLAND EXPLORATION LTD` and `Kenorland Minerals North
+        # America Ltd.`, which are one corporate family and score far below the
+        # similarity threshold because everything after the first word differs.
+        # Barrick is the same shape — the issuer renamed from Barrick Gold to
+        # Barrick Mining in 2025. Generic first tokens are excluded or the queue
+        # fills with every company whose name starts with "GOLD".
+        head = k.split()[0]
+        if head in _GENERIC_TOKENS or len(head) < 4:
+            continue
+        fam = [c for c in keys if c.split()[0] == head]
+        for cand in fam[:3]:
+            near.append({"owner_name": name, "candidate_issuer_name": cand,
+                         "candidate_issuer_id": lookup[cand],
+                         "similarity": round(SequenceMatcher(None, k, cand).ratio(), 4),
+                         "reason": f"shared distinctive first token {head!r} — "
+                                   f"possible corporate family, NOT auto-merged"})
     seed = seed.copy()
     seed["sedar_issuer_id"] = ids
     return seed, pd.DataFrame(near)

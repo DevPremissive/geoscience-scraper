@@ -1155,6 +1155,96 @@ within 7 years — 47,450 tier-1 negatives remain. Only **20% carry known commod
 the rest are (location, depth) with commodities unknown, which is a materially weaker
 negative and is recorded as such rather than treated as "tested for everything".
 
+## L. C6.2 build findings (2026-08-18)
+
+### L1. The SEDAR+ corpus C3.5 plans to fetch already exists on this machine
+
+PLAN_C3 3.5 schedules SEDAR+ pulls "reuse `mining-scraper`", and C6.2 depends on
+them. Before writing a connector: `mining-scraper/Downloads/` holds **1,414 filing
+index CSVs covering 1,401 distinct issuers, 658,812 filings, 1997-02-03 to
+2026-08-06**, plus a 4,629-row exchange/ticker universe.
+
+C6.2 therefore makes **no network call at all**. That is not only convenience —
+this repo hitting SEDAR+ would burn the IP reputation and anti-bot posture the
+scraper project maintains, for data already on disk. `config.SEDAR_CORPUS`
+points at it read-only.
+
+**What the index does and does not carry.** Document *type* and *date*, never
+content and never a headline: every news release is titled `News release -
+English.pdf`. So `financings_24mo` is real (a Report of exempt distribution is a
+closed placement, filed and dated) while `treasury_estimate`, `burn_estimate`
+and `drill_program_status` are not obtainable from it, and `buyer_capacity` and
+`buyer_timing` derive from those. All five are emitted null with
+`missing_because` naming the document that would fill each. Filling them is the
+A1/A2 PDF campaign, not a new scrape.
+
+### L2. Ontario registers carry no transfers — but they do carry pickups
+
+PLAN_C6 6.2 sources `consolidator_flag` from acquisition history. Checked:
+the cancelled register's `REVISION_N` tracks boundary and administrative changes,
+and **across 431,735 records not one tenure shows a holder change between
+revisions**. Ontario does not publish claim transfers.
+
+What the registers do support is the behaviour that actually matters to this
+business — taking over ground someone else dropped. A current claim whose polygon
+sits on a cancelled claim that terminated before the current one was issued, held
+by a different party, is a pickup. Ontario has **110,206**, by 739 distinct
+parties, median 17 claims each.
+
+Two traps on the way there, both of which produced confident wrong numbers:
+
+- **Matching on the r7 cell gave 1,641,049 "pickups" from 533,210 expiries.** An
+  r7 hex is 5.2 km²; two claims inside one are not the same ground. The join has
+  to be spatial on claim geometry (a 400k × 430k sjoin runs in 3 seconds).
+- **Comparing `HOLDER` strings raw reported all 129,291 pairs as holder changes**,
+  including the 16,174 that are one company re-staking its own ground, because
+  the operational register writes `(100) NAME` and the cancelled register
+  `(408864) NAME (100%)`. Parse before comparing — the same two-format trap as I10.
+
+### L3. A threshold set from a prior flagged 96% of the population
+
+`consolidator_flag` at a flat "≥10 pickups and ≥2 counterparties" was true of 26
+of 27 seeded buyers. The seed set is by construction the large holders, and the
+province-wide *median* picker has taken 17 claims — the threshold sat below the
+median of the thing it was supposed to select. It is now the p90 of the observed
+739-picker distribution (225 claims), recomputed each run and written to the
+output. Applies generally: a flag defined against a prior rather than against the
+population it will be applied to ranks nothing.
+
+### L4. 23 of 1,401 captured SEDAR+ profiles are stubs
+
+The first dossier named **Harfang Exploration Inc.** as its most likely buyer and
+reported zero material change reports and zero financings in 24 months. Harfang is
+an active TSXV junior; its captured profile (issuer `000054915`) holds **one
+document, a 2022 early warning report**. Puma Exploration, Eastern Platinum and
+NuLegacy Gold are the same shape. SEDAR+ carries duplicate and stub profiles under
+similar names and a name search can land on one.
+
+A reporting issuer files financials at least annually, so any profile with fewer
+than 10 filings or no financial statements ever is now marked
+`resolved_but_profile_thin`, queued for re-capture, and carries a warning into the
+dossier. **Reporting an active company as silent is worse than reporting it as
+unknown** — the first is a wrong fact, the second is an honest gap.
+
+### L5. Resolution ceiling is corpus coverage, not the matcher
+
+8 of 20 seeded corporate owners resolved on the first pass, and the misses were
+not matcher failures: Agnico Eagle, VCC Resources, East Timmins Nickel and Epica
+Gold are simply **absent from the 1,401-issuer corpus**, which covers 30% of the
+4,629-company universe. Unresolved owners are therefore labelled by *reason* —
+`absent_from_local_corpus`, `listed_but_filings_not_captured`, `not_an_issuer`,
+`near_match_queued`, `resolved_but_profile_thin` — and the capture gaps written to
+`market/corpus_gaps.parquet` as a work list for the scraper project.
+
+Two corporate families needed a second proposal channel. `KENORLAND EXPLORATION
+LTD` (54,020 claims, the largest holder in Ontario) against `KENORLAND MINERALS`
+scores 0.67 on sequence similarity — far below the 0.92 review threshold — and
+`BARRICK GOLD INC.` against `BARRICK MINING` scores 0.69, the issuer having
+renamed in 2025. Both share a distinctive first token, which is now a second
+route into the review queue, with generic heads (`GOLD`, `CANADA`, `RESOURCES`, …)
+excluded so the queue does not fill with coincidences. Queue: 4 rows. Still never
+auto-merged.
+
 ---
 
 ## Change log
@@ -1162,3 +1252,4 @@ negative and is recorded as such rather than treated as "tested for everything".
 - **2026-08-13** — initial audit; all findings above recorded after a second challenge pass. Six first-pass conclusions were corrected: B1 strengthened, B2 reframed, B4/D3/D5-Chroma downgraded, A2 qualified.
 - **2026-08-13 (third pass)** — finding F: the MLAS operational bulk shapefiles overturn A2. Ontario ownership and an unbiased 2018-onward staked/dropped history are openly published. Phase 1 reverted to Ontario; C0.9 withdrawn; gap #11 closed and #16 opened.
 - **2026-08-14 (execution pass)** — section I, found while running C0.1 rather than by auditing: the harvest skip logic would have made the re-harvest a silent no-op (I1); two of the LIO layer ids the plan lists are group layers (I2); gap #15 `SK_SMDI` diagnosed as our own hardcoded `layers=1`, fix blocked on an SK service outage (I3); one further HTML payload found by `verify_harvest.py` (I4). B2's 1,016 ogsearth rows reconciled from disk, sha-verified — no data lost, as predicted.
+- **2026-08-18 (C6.2 pass)** — section L: the SEDAR+ corpus C3.5 planned to fetch is already on disk (1,401 issuers, 658,812 filings), so C6.2 makes no network call; Ontario publishes no claim transfers but 110,206 geometric pickups; two measurement traps (r7 co-occurrence, unparsed HOLDER) and one threshold-from-a-prior corrected; 23 captured issuer profiles found to be stubs.

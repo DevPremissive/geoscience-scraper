@@ -313,17 +313,33 @@ def build(juris: str = "ON", write: bool = True):
     # the fix is to harvest that issuer; an ambiguous name is a human decision.
     # Reporting one number for both would hide which.
     seed, gaps = _explain_unresolved(seed, near)
+
+    act = S.activity(fdf)
+    fin = S.latest_financials(fdf)
+    qual = S.profile_quality(idf, fdf)
+    prof = (seed.merge(act, left_on="sedar_issuer_id", right_on="issuer_id",
+                       how="left")
+                .merge(fin, on="issuer_id", how="left")
+                .merge(qual, on="issuer_id", how="left"))
+    prof["profile_thin"] = prof["profile_thin"].fillna(False)
+    thin = prof["profile_thin"] & prof["sedar_issuer_id"].notna()
+    if thin.any():
+        prof.loc[thin, "resolution_status"] = "resolved_but_profile_thin"
+        print(f"    {int(thin.sum())} resolved profile(s) hold fewer than "
+              f"{S.MIN_CREDIBLE_FILINGS} filings or no financials — treated as a "
+              f"capture gap, not as a silent company")
+        # Same problem as an absent issuer, same fix: re-capture it.
+        extra = prof.loc[thin, ["name_raw", "ticker", "exchange", "claims"]].copy()
+        extra["resolution_status"] = "resolved_but_profile_thin"
+        extra["wanted_for"] = ("C6.2 buyer profile — captured profile is a stub or "
+                               "duplicate; re-capture against the operating profile")
+        gaps = pd.concat([gaps, extra], ignore_index=True)
     if write and len(gaps):
         C.MARKET_DIR.mkdir(parents=True, exist_ok=True)
         gaps.to_parquet(C.MARKET_DIR / "corpus_gaps.parquet", index=False,
                         compression="zstd")
         print(f"  → {C.MARKET_DIR/'corpus_gaps.parquet'}  ({len(gaps)} issuers "
               f"worth capturing next)")
-
-    act = S.activity(fdf)
-    fin = S.latest_financials(fdf)
-    prof = seed.merge(act, left_on="sedar_issuer_id", right_on="issuer_id",
-                      how="left").merge(fin, on="issuer_id", how="left")
 
     # Pickup history, on normalised names so it works for owners with no issuer.
     real = pk[pk["relation"] == "pickup"]

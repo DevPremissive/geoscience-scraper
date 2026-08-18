@@ -156,6 +156,29 @@ def load_corpus():
     return idf, fdf, skipped
 
 
+
+#: A reporting issuer files financial statements at least annually, so a captured
+#: profile holding a handful of documents is not that issuer's real profile.
+#: SEDAR+ carries duplicate and stub profiles under similar names, and a name
+#: search can land on one: Harfang Exploration Inc. resolves to a profile with a
+#: single 2022 early warning report, and Puma Exploration and Eastern Platinum do
+#: the same. Presenting those as a buyer's filing history would report an active
+#: company as silent, which is worse than reporting it as unknown.
+MIN_CREDIBLE_FILINGS = 10
+
+
+def profile_quality(idf, fdf):
+    """Flag captured profiles too thin to be the issuer's real filing history."""
+    import pandas as pd
+    has_fin = set(fdf[fdf["doc_class"].isin(
+        ["financials_annual", "financials_interim"])]["issuer_id"])
+    out = idf[["issuer_id", "n_filings"]].copy()
+    out["has_financials"] = out["issuer_id"].isin(has_fin)
+    out["profile_thin"] = ((out["n_filings"] < MIN_CREDIBLE_FILINGS) |
+                           ~out["has_financials"])
+    return out[["issuer_id", "has_financials", "profile_thin"]]
+
+
 def activity(fdf, as_of: dt.date | None = None, months: int = 24):
     """Per-issuer filed-event counts over a window. Every count is of a filing
     that exists, is dated, and can be pulled by anyone who wants to check."""

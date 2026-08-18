@@ -294,6 +294,111 @@ def _drilling_section(cell_id: str, radius_km: float = 2.0):
                "not test a Li thesis."])
 
 
+def _buyers_section(cell_id: str, juris: str):
+    """Who would buy this cell, and what is actually known about them (C6.2).
+
+    A buyer here is the owner of a block this cell sits on the frontier of. The
+    section states capacity and timing as unknown rather than estimating them:
+    both need figures that live inside filing PDFs, and a treasury number with no
+    filing behind it is exactly the kind of value the provenance rule exists to
+    keep out of a dossier.
+    """
+    import duckdb
+    import pandas as pd
+    bp = C.MARKET_DIR / "buyers.parquet"
+    if not bp.exists():
+        return Section(key="buyers", title="Buyers", available=False,
+                       unavailable_reason="market/buyers.parquet not built (C6.2)")
+    odb = C.PROCESSED_DIR / "ownership.duckdb"
+    if not odb.exists():
+        return Section(key="buyers", title="Buyers", available=False,
+                       unavailable_reason="ownership.duckdb not built (C1.4)")
+    con = duckdb.connect(str(odb), read_only=True)
+    nb = con.execute("""
+        SELECT DISTINCT b.owner_id, f.block_id
+        FROM frontier f JOIN blocks b USING (block_id)
+        WHERE f.open_cell_id = ?""", [cell_id]).fetchdf()
+    con.close()
+    if nb.empty:
+        return Section(key="buyers", title="Buyers", available=False,
+                       unavailable_reason=(
+                           "this cell is not on any mapped block's frontier, so "
+                           "it has no adjacent owner to sell to"))
+    b = pd.read_parquet(bp)
+    hit = b[b["owner_id"].isin(set(nb["owner_id"]))].sort_values(
+        "buyer_propensity", ascending=False)
+    if hit.empty:
+        return Section(key="buyers", title="Buyers", available=False,
+                       unavailable_reason=(
+                           "the adjacent owners are not in the buyer graph — the "
+                           "graph is seeded from criticality, so a neighbour with "
+                           "no critical cell is not profiled"))
+    snap = str(hit["profile_as_of"].iloc[0])
+    src = "market/buyers.parquet"
+
+    def n(v):
+        return None if v is None or pd.isna(v) else int(v)
+
+    rows = []
+    for r in hit.head(6).itertuples(index=False):
+        resolved = pd.notna(r.sedar_issuer_id) and r.sedar_issuer_id
+        rows.append({
+            "owner": r.name_raw,
+            "sedar_issuer_id": r.sedar_issuer_id if resolved else None,
+            "resolution": r.resolution_status,
+            "claims_held": int(r.claims),
+            "critical_cells": int(r.critical_cells),
+            "pickups_from_others": int(r.pickup_claims),
+            "pickup_counterparties": int(r.pickup_counterparties),
+            "consolidator": bool(r.consolidator_flag),
+            "material_change_24mo": n(r.n_material_change_24mo),
+            "closed_financings_24mo": n(r.n_financing_closed_24mo),
+            "news_per_quarter": (None if pd.isna(r.news_cadence_per_quarter)
+                                 else float(r.news_cadence_per_quarter)),
+            "propensity": float(r.buyer_propensity),
+            "capacity": None,
+            "timing": None,
+        })
+    top = hit.iloc[0]
+    top_thin = str(top["resolution_status"]) == "resolved_but_profile_thin"
+    facts = [
+        Fact(label="Natural buyers", value=int(len(hit)),
+             provenance=_prov(src, snap),
+             note="owners of blocks this cell is on the frontier of"),
+        Fact(label="Most likely buyer", value=str(top["name_raw"]),
+             provenance=_prov(src, snap),
+             note=(f"propensity {float(top['buyer_propensity']):.3f} = "
+                   f"0.45 adjacency + 0.35 pickup history + 0.20 disclosure "
+                   f"activity; each term is in the table") +
+                  (" — WARNING: the captured SEDAR+ profile for this issuer is a "
+                   "stub, so its disclosure term is understated and its filing "
+                   "counts below mean 'not captured', not 'not filed'"
+                   if top_thin else "")),
+        Fact(label="Buyer capacity", value="UNKNOWN",
+             provenance=_prov(src, snap),
+             note="needs treasury from the issuer's most recent financial "
+                  "statements; the filing index gives dates and types, not the "
+                  "figures inside the PDF"),
+        Fact(label="Buyer timing", value="UNKNOWN",
+             provenance=_prov(src, snap),
+             note="needs drill-program status from news release text; every news "
+                  "release in the SEDAR+ index is titled 'News release - "
+                  "English.pdf', so the index alone cannot supply it"),
+    ]
+    return Section(
+        key="buyers", title="Buyers", facts=facts,
+        tables={"candidate_buyers": rows},
+        notes=[
+            "'Pickups' counts current claims standing on ground a DIFFERENT party "
+            "let go, matched on claim geometry. Self re-stakes and partner "
+            "changes are excluded.",
+            "Consolidator is the province-wide 90th percentile of pickup volume, "
+            "not a fixed count — the median Ontario picker has taken 17 claims.",
+            "An unresolved owner means its filings are not in the local corpus; "
+            "it does not mean the company is inactive.",
+        ])
+
+
 def _unavailable(key, title, reason):
     return Section(key=key, title=title, available=False,
                    unavailable_reason=reason)
@@ -310,6 +415,7 @@ def assemble(cell_id: str, juris: str = "ON", profile: str = "internal"):
         _activity_section(cell_id, juris),
         _neighbours_section(cell_id, juris),
         _criticality_section(cell_id),
+        _buyers_section(cell_id, juris),
         _geology_section(cell_id, juris),
         _drilling_section(cell_id),
         _unavailable("history", "History (reports)",
@@ -317,13 +423,14 @@ def assemble(cell_id: str, juris: str = "ON", profile: str = "internal"):
                      "work-history, best-historical-result or reason-work-stopped "
                      "summary can be cited"),
         _unavailable("economics", "Economics",
-                     "C6 not built — no comps database, no buyer profiles, no "
-                     "valuation model, and rules/ON.yaml is unsigned so even the "
-                     "holding schedule cannot be quoted"),
+                     "C6.2 buyer profiles are built (see Buyers), but pricing is "
+                     "not: no comps database (6.1), no valuation model (6.4), and "
+                     "rules/ON.yaml is unsigned so even the holding schedule "
+                     "cannot be quoted"),
         _unavailable("recommendation", "Recommendation & signoff",
-                     "a recommendation requires the Economics section; with no "
-                     "buyer, price range or deal score, any recommendation would "
-                     "be an opinion dressed as an analysis"),
+                     "a named buyer now exists (C6.2) but a price range does "
+                     "not; with no comps and no valuation, any recommendation "
+                     "would be an opinion dressed as an analysis"),
     ]
 
     gates = []

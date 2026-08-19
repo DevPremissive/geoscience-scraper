@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Canada Geo Data Lake — targeting viewer</title>
+<link rel="stylesheet" href="/viewer/vendor/maplibre-gl.css">
+<link rel="stylesheet" href="/viewer/style.css">
+</head>
+<body>
+<div id="map"></div>
+
+<aside id="rail">
+  <header>
+    <h1>Targeting viewer</h1>
+    <p class="sub">C4.2 · navigation over the lake</p>
+  </header>
+
+  <section>
+    <h2>Surface</h2>
+    <select id="metric"></select>
+    <div id="metricControls">
+      <label class="row" id="quarterRow">
+        <span>Quarter</span>
+        <select id="quarter"></select>
+      </label>
+      <label class="row" id="modelRow" hidden>
+        <span>Model</span>
+        <select id="model"></select>
+      </label>
+      <label class="row" id="blockRow" hidden>
+        <span>Block</span>
+        <select id="block"></select>
+      </label>
+    </div>
+    <div id="metricMeta" class="meta"></div>
+  </section>
+
+  <section>
+    <h2>Layers</h2>
+    <label class="chk"><input type="checkbox" id="l_context" checked> Province &amp; lakes</label>
+    <label class="chk"><input type="checkbox" id="l_fabric" checked> Metric surface</label>
+    <label class="chk"><input type="checkbox" id="l_land"> Land state (C1.1)</label>
+    <label class="chk"><input type="checkbox" id="l_criticality"> Criticality (C1.5)</label>
+    <label class="chk"><input type="checkbox" id="l_claims"> Claims</label>
+    <label class="chk"><input type="checkbox" id="l_blocks"> Ownership blocks (C1.4)</label>
+    <label class="chk"><input type="checkbox" id="l_events"> Tenure events</label>
+    <label class="row"><span>AOI</span><select id="aoi"></select></label>
+    <div id="landLegend" class="legend"></div>
+  </section>
+
+  <section id="timeSection">
+    <h2>Tenure events</h2>
+    <p class="hint">The point-in-time archive. Drag to move a 12-month window.</p>
+    <input type="range" id="timeScrub" min="0" max="100" value="100">
+    <div id="timeLabel" class="meta"></div>
+  </section>
+
+  <section>
+    <h2>Watched blocks</h2>
+    <div id="blockList" class="list"></div>
+  </section>
+
+  <section>
+    <h2>Go to</h2>
+    <input type="text" id="goto" placeholder="H3 cell id, or lon,lat">
+    <button id="gotoBtn">Locate</button>
+    <div id="dossierList" class="list"></div>
+  </section>
+
+  <footer>
+    <div id="status" class="meta">loading…</div>
+    <p class="meta">No basemap and no CDN: nothing here calls out. Ground is
+      drawn from <code>geo.gpkg</code>.</p>
+  </footer>
+</aside>
+
+<section id="panel" hidden>
+  <button id="panelClose" title="close">×</button>
+  <div id="panelBody"></div>
+</section>
+
+<script src="/viewer/vendor/maplibre-gl.js"></script>
+<script src="/viewer/app.js"></script>
+</body>
+</html>

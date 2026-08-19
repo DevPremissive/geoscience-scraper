@@ -2,11 +2,18 @@
 serve.py — FastAPI geospatial data server for the Canada Geo Data Lake.
 
 Endpoints:
-  GET /                    — HTML map UI (MapLibre)
+  GET /                    — the C4.2 targeting viewer (viewer/)
+  GET /browse              — the original generic GPKG layer browser
   GET /layers              — list GPKG layers with feature counts
   GET /search?q=...        — full-text search across catalog
   GET /geojson/{layer}     — sample GeoJSON from a layer (no bbox filter)
   GET /coverage            — jurisdiction coverage summary
+  GET /api/*, /render      — the C4.2 map service (see mapapi.py)
+
+Nothing served from here loads a third-party asset. The browser UI used to pull
+MapLibre from unpkg and basemap tiles from a CDN; both are now local, because a
+tile request per pan tells a third party which ground we are looking at (see
+viewer/vendor/NOTICE.md).
 """
 from __future__ import annotations
 import json, sys
@@ -28,6 +35,21 @@ except ImportError:
 
 app = FastAPI(title="Canada Geo Data Lake API")
 
+VIEWER_DIR = Path(__file__).resolve().parent.parent / "viewer"
+
+# C4.2. Mounted rather than reimplemented: the resolvers in mapapi.py are shared
+# with the dossier's figure renderer, so a figure cannot disagree with the map.
+try:
+    import mapapi
+    app.include_router(mapapi.build_router())
+    if VIEWER_DIR.exists():
+        from fastapi.staticfiles import StaticFiles
+        app.mount("/viewer", StaticFiles(directory=str(VIEWER_DIR), html=True),
+                  name="viewer")
+    MAPAPI_ERROR = None
+except Exception as _e:  # keep the data API up even if the map service cannot load
+    MAPAPI_ERROR = f"{type(_e).__name__}: {_e}"
+
 
 def get_db() -> duckdb.DuckDBPyConnection:
     con = duckdb.connect(str(C.CATALOG_DB))
@@ -45,8 +67,8 @@ HTML_UI = """<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Canada Geo Data Lake</title>
-<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css">
-<script src="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js"></script>
+<link rel="stylesheet" href="/viewer/vendor/maplibre-gl.css">
+<script src="/viewer/vendor/maplibre-gl.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:system-ui,sans-serif;font-size:14px}
@@ -76,10 +98,24 @@ body{font-family:system-ui,sans-serif;font-size:14px}
   <details open><summary><strong>Layers</strong></summary><div id="layerList"></div></details>
 </div>
 <script>
+// No basemap style URL: an empty style plus our own province/lakes layer.
+// A hosted style would fetch tiles, glyphs and sprites from a third party on
+// every pan, each request carrying the viewport.
 const map = new maplibregl.Map({
   container:'map',
-  style:'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
-  center:[-95,55], zoom:3
+  style:{version:8, sources:{}, layers:[
+    {id:'bg', type:'background', paint:{'background-color':'#eef1f4'}}]},
+  center:[-95,55], zoom:3,
+  attributionControl:false
+});
+map.on('load', async () => {
+  try {
+    const r = await fetch('/api/context?bbox=-141,41,-52,70');
+    const gj = await r.json();
+    map.addSource('ctx', {type:'geojson', data:gj});
+    map.addLayer({id:'ctx', type:'fill', source:'ctx',
+      paint:{'fill-color':'#fff','fill-outline-color':'#c3ccd6'}});
+  } catch(e) { console.warn('context layer unavailable', e); }
 });
 map.addControl(new maplibregl.NavigationControl());
 let activeGeoLayer = null;
@@ -167,6 +203,25 @@ loadLayers();
 
 @app.get("/")
 def index():
+    """The C4.2 viewer. Falls back to the generic layer browser if viewer/ is
+    missing, so a checkout without the frontend still serves something."""
+    idx = VIEWER_DIR / "index.html"
+    if idx.exists() and MAPAPI_ERROR is None:
+        return HTMLResponse(idx.read_text())
+    body = HTML_UI
+    if MAPAPI_ERROR:
+        body = body.replace("<body>",
+                            f'<body><div style="position:absolute;z-index:99;top:0;'
+                            f'left:0;right:0;background:#fee;padding:6px;font:12px '
+                            f'system-ui">C4.2 map service unavailable: '
+                            f'{MAPAPI_ERROR}</div>')
+    return HTMLResponse(body)
+
+
+@app.get("/browse")
+def browse():
+    """The original generic GPKG layer browser, kept because it is the only UI
+    that lists all 327 layers. Its CDN references are now local."""
     return HTMLResponse(HTML_UI)
 
 
@@ -318,7 +373,7 @@ def main():
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="0.0.0.0")
-    ap.add_argument("--port", type=int, default=8080)
+    ap.add_argument("--port", type=int, default=9877)
     args = ap.parse_args()
     uvicorn.run(app, host=args.host, port=args.port)
 

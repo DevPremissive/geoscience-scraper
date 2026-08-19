@@ -1247,9 +1247,178 @@ auto-merged.
 
 ---
 
+## M. C4.2 build findings, and a sequencing correction (2026-08-18)
+
+### M0. C6.2 was built two items ahead of itself, and the handoff proposed going further
+
+MASTER_PLAN §7 lists the Phase-1 build as: *"C1.1–C1.6 for ON; C2.1 + C2.2 +
+C2.4 + C2.5 + **C4.1 dossier generator v1 + C4.2 minimal map**; C6.2 buyer
+identification; C6.1 comps collection begins."* C6.2 shipped with **C2.2 and
+C4.2 unbuilt**. PLAN_C4 is explicit about the order inside its own component:
+*"Build order within C4: dossier first, map second, DSL third, LLM front-end
+last."*
+
+This was not a harmless reordering, because two things downstream were already
+depending on the map:
+
+- **C4.1 shipped without its figures.** Section 1 specifies "cells (r9 ids +
+  map inset)" and the implementation notes say figures are "inline map figures
+  as static PNGs generated via the map service's render endpoint, 4.2". The
+  dossier had no figures at all — not a NOT AVAILABLE block, just absence, which
+  is the one thing the C4.1 doctrine forbids.
+- **The handoff's recommended next step could not have passed its own
+  acceptance.** It proposed C6.3 momentum. C6.3's acceptance criteria include
+  "(a) the momentum surface renders in the viewer". There was no viewer. C6.3 is
+  also Phase 2 work (§7 puts C6.1–C6.5 there), so taking it would have been a
+  second jump forward from a Phase 1 that was not finished.
+
+The general lesson is not "follow the plan". It is that **a component's
+acceptance criteria name its real dependencies more reliably than its dependency
+list does.** PLAN_C6's header lists C6.3 as depending on C1 and C2; only the
+acceptance text mentions the viewer.
+
+Phase 1 now has **C2.2 (ScienceBase benchmark layers) outstanding** and nothing
+else. C2.2 is scoped at half a day and is the last item before Gate G1.
+
+### M1. `ownership.duckdb:blocks.geometry_wkt` is EPSG:3978, not lon/lat
+
+`ownership_graph.py` dissolves claims in a metric CRS (`to_crs("EPSG:3978")`)
+and writes `blocks.geometry.to_wkt()` from the projected frame. Nothing had
+noticed because every existing consumer joins on `block_id` or on
+`frontier.open_cell_id` — C1.4, C1.5 and C6.2 never intersect that column
+against anything.
+
+The first spatial query against it (blocks in the map viewport, and "blocks
+within 5 km" for the evidence panel) returned **zero rows** for ground that has
+698 blocks in it. A lon/lat envelope against projected geometry does not error;
+it silently matches nothing, and "no neighbours near this cell" is a plausible
+enough answer to publish. Both the envelope and the returned geometry are now
+transformed explicitly, and a test asserts the returned coordinates are Ontario
+lon/lat.
+
+**Anything else that reaches for `geometry_wkt` must transform it.** The column
+is not labelled with its CRS and the store has no CRS metadata.
+
+### M2. A cache keyed on less than it stores fails only in production
+
+`mapapi._read_parquet` cached on `(path, mtime)` and ignored the column
+projection. `/api/catalog` reads three columns of `tenure_events.parquet` for
+the scrubber; `events_layer` reads six. Whichever ran first won the entry.
+
+Every direct call passed — a fresh process, one caller, correct frame. In the
+live server the catalog always loads first, so the events layer always got a
+frame with no `cell_r7` and always 500'd. The smoke test passed the whole time,
+because it only ever exercised one caller per process.
+
+### M3. The event scrubber and the event layer described different series
+
+`event_window()` reported the extent of `tenure_events.parquet` across all
+jurisdictions: **1899-12-30 → 2027-11-02**. The layer it drives draws Ontario
+only, which starts at map staking in 2018-04. A scrubber spanning 128 years to
+control an 8-year layer puts every Ontario event in the last 6% of its travel.
+
+The extreme dates are mostly real rather than corrupt, and the distinction
+matters: 28,208 pre-2000 `staked` events are Yukon's `YT_HISTORICAL_CLAIMS`,
+which genuinely reach to 1899 because Yukon never converted to map staking
+(audit G3). Two artifacts do hide in there — 3 rows at `1899-12-30`, the OLE
+epoch-zero a spreadsheet export writes for a null date, and 2 Yukon `expired`
+rows dated in the future, which are scheduled rather than observed expiries.
+`event_window()` is now jurisdiction-scoped and clipped to today, and reports
+how many rows it excluded.
+
+### M4. `update_all.py` ran a national harvest when imported
+
+The pipeline was written as top-level statements with no `if __name__ ==
+"__main__"` guard, so `import update_all` launched `harvest.py`. An import check
+— the ordinary "do all 54 modules load" sweep — triggered a live Ontario
+harvest, which reached CKAN discovery and took an HTTP 429 before it was killed.
+
+Nothing was lost, and the reason is worth recording as a vindication of audit
+I1's fix: staged downloads meant the aborted run left exactly **one `.part`
+file, six empty dated directories, and zero ledger rows**. `verify_harvest.py`
+reconciled clean afterwards (0 orphans, 0 truncated archives). The residue was
+removed by hand.
+
+The module is now guarded, and a static check confirms no module in `src/` does
+work at import time. **A module that acts when imported cannot be inspected
+safely** — not by a linter, not by a docs tool, not by a person checking whether
+the code still loads.
+
+### M5. The viewer makes no outbound request, and that is a data-security choice
+
+`serve.py`'s inline UI loaded MapLibre from unpkg and basemap tiles from
+`basemaps.cartocdn.com`. A tile fetch is one request per tile per pan, each
+carrying the bounding box on screen.
+
+Master §8 records that heat is public and that the defensible edge is the joined
+signal plus the point-in-time archive. The viewport is the compact expression of
+that joined signal — it is *where we have decided to look* — and streaming it to
+a tile host for a prettier background trades the one thing the archive is for.
+MapLibre is vendored (`viewer/vendor/`, BSD-3, hashes in NOTICE.md), the map's
+ground is the provincial boundary and major lakes out of `geo.gpkg`, and the
+style declares no `glyphs` or `sprite` origin — a style with a glyph URL fetches
+from it the moment any text is drawn, so the viewer draws no text on the map and
+labels in the DOM instead. `test_mapapi.py` asserts the rule rather than
+trusting it, over the viewer sources and `serve.py` both.
+
+### M6. H3 removes the need for a vector-tile pipeline at this scale
+
+Audit D5 corrected the plan's premise that `serve.py` already had tiles, and
+budgeted MVT as new work. It is avoidable for now. An H3 cell id *is* a spatial
+index: `cell_to_parent` aggregates a viewport's cells to r6/r5/r4 for free, so
+the resolver picks the finest resolution whose count fits a feature budget and
+stamps the choice on the response. Ontario's 164,577 r7 cells come back as 3,701
+r5 cells at province zoom, 2,785 r6 at regional, native r7 below that.
+
+Two details make it honest rather than merely small: the aggregate reports
+`n_source_cells` and its `agg` function, so it cannot be mistaken for the
+underlying cells; and the aggregation is `max`, not `mean`, because these are
+sparse intensity surfaces — 36,299 of 164,577 cells carry any heat — and
+averaging a hot cell against eleven empty neighbours hides the thing the
+overview exists to find.
+
+Land state is the exception that proves it: a downsampled r9 state map would
+show one arbitrary child's state as the hex's, so over budget it switches to a
+*different quantity* — open fraction per r7 — and says so.
+
+
+### M7. Nunavut is not dead — the daily timer already re-took it
+
+Found while regenerating `COVERAGE.md`, not by looking for it. The handoff and
+the 2026-08-17 memory both record `geo.sac-isc.gc.ca` as retired ("URL invalide"
+on every endpoint including the service root), with NU accruing no new history.
+
+The ledger says otherwise. All three NU codes fetched cleanly on **2026-08-18 at
+05:41** — `NU_MINERAL_CLAIMS` 31.97 MB with a new sha256 against June's,
+`NU_MINING_LEASES` 1.79 MB, `NU_PROSPECTING_PERMITS` 10.13 MB — because they are
+in `TENURE_CODES` and the daily timer simply kept trying. Feature count moved
+34,411 → **34,519**.
+
+The payload is real, and better than expected: `CLAIM_NUM`, `CLAIM_STAT`
+(including `CANCELLED`), `ISSUE_DATE`, `CANCEL_DT`, `STAKING_DT`, `ANNIV_DT`,
+`AREA_HA`, `OWNERS`. That is owner, expiry *and* retained cancelled records —
+the same shape that made Ontario the Phase-1 slice under audit F, on a register
+that has only run since NU's 2021 conversion, so the history is short but
+unbiased.
+
+Two things follow. **A dead-upstream finding has a shelf life**, and this one
+lasted a day; anything recorded as retired should be re-checked against the
+ledger before it is planned around. And this is the first concrete return on
+pulling C3.1 into Phase 0 (Master §7): nobody re-tested Nunavut, the scheduler
+did, and the recovery was captured the morning it happened rather than whenever
+someone next looked.
+
+Saskatchewan has *not* recovered on the same clock, and not for the same reason:
+`SK_MINERAL_EXPLORATION` and `SK_SMDI` are classed `geoscience`, which runs
+Sundays, so their next attempt is 2026-08-23. That is cadence, not an outage.
+
+
+---
+
 ## Change log
 
 - **2026-08-13** — initial audit; all findings above recorded after a second challenge pass. Six first-pass conclusions were corrected: B1 strengthened, B2 reframed, B4/D3/D5-Chroma downgraded, A2 qualified.
 - **2026-08-13 (third pass)** — finding F: the MLAS operational bulk shapefiles overturn A2. Ontario ownership and an unbiased 2018-onward staked/dropped history are openly published. Phase 1 reverted to Ontario; C0.9 withdrawn; gap #11 closed and #16 opened.
 - **2026-08-14 (execution pass)** — section I, found while running C0.1 rather than by auditing: the harvest skip logic would have made the re-harvest a silent no-op (I1); two of the LIO layer ids the plan lists are group layers (I2); gap #15 `SK_SMDI` diagnosed as our own hardcoded `layers=1`, fix blocked on an SK service outage (I3); one further HTML payload found by `verify_harvest.py` (I4). B2's 1,016 ogsearth rows reconciled from disk, sha-verified — no data lost, as predicted.
 - **2026-08-18 (C6.2 pass)** — section L: the SEDAR+ corpus C3.5 planned to fetch is already on disk (1,401 issuers, 658,812 filings), so C6.2 makes no network call; Ontario publishes no claim transfers but 110,206 geometric pickups; two measurement traps (r7 co-occurrence, unparsed HOLDER) and one threshold-from-a-prior corrected; 23 captured issuer profiles found to be stubs.
+- **2026-08-18 (C4.2 pass)** — section M: C6.2 had been built ahead of C2.2 and C4.2, and the handoff's C6.3 recommendation could not have met its own acceptance without a viewer (M0); `blocks.geometry_wkt` is EPSG:3978 and silently matched nothing against a lon/lat envelope (M1); a parquet cache keyed on less than it stored failed only under the live server's call order (M2); the event scrubber spanned Yukon's 1899 paper record while its layer drew Ontario (M3); `update_all.py` ran a national harvest on import (M4); the viewer and its figures now make no outbound request at all (M5); H3 parent aggregation defers the MVT pipeline (M6); and Nunavut, recorded dead upstream on 2026-08-17, was re-harvested by the daily timer on 2026-08-18 with owners, staking dates and retained cancellations (M7).

@@ -51,6 +51,9 @@ TEMPLATE = """<!doctype html>
  .gate{background:#f4f0ff;border-left:3px solid #5b3fa8;padding:.7rem .9rem;
       margin:1rem 0;font-size:.87rem}
  .scroll{overflow-x:auto}
+ figure{margin:.8rem 0}
+ figure img{width:100%;border:1px solid var(--line);border-radius:4px;display:block}
+ figcaption{color:var(--mut);font-size:.8rem;margin-top:.35rem}
 </style>
 <h1>{{ d.target_id }}</h1>
 <div class="meta">
@@ -79,6 +82,15 @@ profile is blocked until written permission is on file.</div>
     {% if f.note %}<div class="note">{{ f.note }}</div>{% endif %}
   </div>
   {% endfor %}
+  {% for fig in s.figures %}
+  <figure>
+    <img alt="{{ fig.title }}" src="data:{{ fig.mime }};base64,{{ fig.data_base64 }}">
+    <figcaption>{{ fig.caption }}
+      <span class="prov">[{{ fig.provenance.source_id }} @
+        {{ fig.provenance.snapshot_date }} · {{ fig.generated_by }} ·
+        redistribution: {{ fig.redistribution }}]</span></figcaption>
+  </figure>
+  {% endfor %}
   {% for name, rows in s.tables.items() %}
     {% if rows %}
     <div class="scroll"><table>
@@ -98,9 +110,35 @@ fails rather than emitting it (Master §4).</p>
 """
 
 
-def render(dossier_path: Path, out: Path | None = None) -> Path:
-    from jinja2 import Template
+def render(dossier_path: Path, out: Path | None = None,
+           profile: str = "internal") -> Path:
+    """Render to self-contained HTML. Figures are inlined as data: URIs, so the
+    document opens with no server, no network and no sibling files.
+
+    The render-time redistribution assertion PLAN_C4 4.1 asks for lives here.
+    Assembly already refuses a sales profile while any source is licence-gated,
+    but figures are the specific thing MNDM reserves ("reproduction of maps or
+    figures"), and they can be added to a section long after that gate was
+    written. Checking again at render is cheap and catches the case where a
+    dossier assembled as internal is later rendered for a buyer."""
     d = json.loads(Path(dossier_path).read_text(encoding="utf-8"))
+    if profile == "sales":
+        blocked = [
+            f"{s.get('key')}/{f.get('key')} ({f.get('redistribution')})"
+            for s in d.get("sections", [])
+            for f in (s.get("figures") or [])
+            if f.get("redistribution") != "granted"
+        ]
+        if blocked:
+            raise PermissionError(
+                "REFUSING to render a sales-profile dossier: these figures are "
+                "not cleared for redistribution — " + ", ".join(blocked) +
+                ".\n\nOntario MLAS tenure ships under MNDM Electronic "
+                "Information Products terms; reproduction of maps or figures "
+                "requires prior written permission (audit H). Set each figure's "
+                "redistribution to 'granted' only once that permission is on "
+                "file.")
+    from jinja2 import Template
     html = Template(TEMPLATE).render(d=_Obj(d))
     out = out or Path(dossier_path).with_suffix(".html")
     out.write_text(html, encoding="utf-8")
@@ -126,8 +164,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dossier", required=True)
     ap.add_argument("--out")
+    ap.add_argument("--profile", default="internal", choices=["internal", "sales"])
     args = ap.parse_args()
-    p = render(Path(args.dossier), Path(args.out) if args.out else None)
+    try:
+        p = render(Path(args.dossier), Path(args.out) if args.out else None,
+                   args.profile)
+    except PermissionError as e:
+        print(f"\n{e}\n")
+        sys.exit(2)
     print(f"  → {p}  ({p.stat().st_size/1024:.0f} KB)")
     print("  local file only — nothing uploaded")
 

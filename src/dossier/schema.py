@@ -48,6 +48,31 @@ class Fact(BaseModel):
     note: str | None = None
 
 
+#: What may be done with a figure outside this machine. Defaults to the
+#: restrictive value for anything not explicitly cleared, per audit H: Ontario's
+#: MLAS tenure ships under MNDM Electronic Information Products terms and
+#: "reproduction of maps or figures" is one of the three things reserved.
+Redistribution = Literal["open", "permission_required", "granted"]
+
+
+class Figure(BaseModel):
+    """A rendered map figure, embedded rather than linked.
+
+    Base64 inside the document, not a path beside it: a dossier is passed around
+    as a decision record, and a figure that lives in a sibling file is a figure
+    that goes missing. The renderer inlines it as a `data:` URI, so the HTML
+    makes no request for it either — the document opens correctly with no
+    server, no network and no adjacent directory."""
+    key: str
+    title: str
+    caption: str
+    mime: str = "image/png"
+    data_base64: str
+    provenance: Provenance
+    generated_by: str
+    redistribution: Redistribution = "permission_required"
+
+
 class Section(BaseModel):
     """One dossier section. Either it has facts, or it says why it does not."""
     key: str
@@ -56,6 +81,7 @@ class Section(BaseModel):
     unavailable_reason: str | None = None
     facts: list[Fact] = Field(default_factory=list)
     tables: dict[str, list[dict]] = Field(default_factory=dict)
+    figures: list[Figure] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
 
     @field_validator("unavailable_reason")

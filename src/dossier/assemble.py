@@ -26,7 +26,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config as C
-from dossier.schema import Dossier, Section, Fact, Provenance
+from dossier.schema import Dossier, Section, Fact, Figure, Provenance
 
 #: Sources whose licence forbids redistribution without written permission.
 #: Keyed by the substring that identifies them in a source_id.
@@ -42,6 +42,56 @@ LICENCE_GATED = {
 
 def _prov(source_id: str, snapshot: str) -> Provenance:
     return Provenance(source_id=source_id, snapshot_date=snapshot)
+
+
+def _figure(key: str, title: str, caption: str, cell_id: str,
+            layers: tuple[str, ...], pad: float, snapshot: str,
+            block: str | None = None, width: int = 780, height: int = 520):
+    """Render one map figure through the C4.2 service.
+
+    PLAN_C4 4.1 says dossier figures come from "the map service's render
+    endpoint — one map code path, not two". This calls the resolvers directly
+    rather than over HTTP: it is the same code, and a dossier that only
+    assembles when a web server happens to be running is a worse artifact.
+
+    A figure that cannot be drawn returns None and the section says so. It must
+    never take the dossier down — the text is the evidence, the picture is
+    navigation."""
+    import base64
+    try:
+        import mapapi
+    except Exception as e:
+        return None, f"figure unavailable: map service failed to import ({e})"
+    try:
+        bbox = mapapi.cell_bbox(cell_id, pad)
+        built = []
+        for name in layers:
+            fn = mapapi.RENDER_LAYERS.get(name)
+            if not fn:
+                continue
+            try:
+                built.append(fn(bbox=bbox, block=block))
+            except Exception:
+                continue
+        if not built:
+            return None, "figure unavailable: no layer resolved for this extent"
+        import h3
+        lat, lng = h3.cell_to_latlng(cell_id)
+        png = mapapi.render_png(built, bbox, width, height, title=title,
+                               marker=(lng, lat),
+                               attribution="Derived from MNDM MLAS and Ontario LIO "
+                                           "data. (c) King's Printer for Ontario.")
+    except Exception as e:
+        return None, f"figure unavailable: {type(e).__name__}: {e}"
+    return Figure(
+        key=key, title=title, caption=caption,
+        data_base64=base64.b64encode(png).decode("ascii"),
+        provenance=_prov(f"mapapi:{'+'.join(layers)}", snapshot),
+        generated_by="mapapi.render_png (C4.2)",
+        # Derived from MLAS. Our own cartography, but of licence-gated data, so
+        # it defaults to the restrictive value and the sales render checks it.
+        redistribution="permission_required",
+    ), None
 
 
 def _land_section(cell_id: str, juris: str):
@@ -100,8 +150,19 @@ def _land_section(cell_id: str, juris: str):
             "Outstanding: " + "; ".join(missing[:4]) +
             ". holding_schedule() refuses to compute from placeholder values, so "
             "no acquisition cost can be quoted.")
+    figures = []
+    fig, why = _figure(
+        "land_inset", f"{cell_id} - land context",
+        "The target cell (red marker) against current land state and the "
+        "claim register. Green is open ground, red is claimed; the grid is "
+        "individual cell claims.",
+        cell_id, ("context", "land", "claims"), pad=8.0, snapshot=snap)
+    if fig:
+        figures.append(fig)
+    else:
+        notes.append(f"MAP INSET NOT RENDERED - {why}")
     return Section(key="land", title="Identity & land", facts=facts,
-                   tables=tables, notes=notes)
+                   tables=tables, figures=figures, notes=notes)
 
 
 def _activity_section(cell_id: str, juris: str):
@@ -196,6 +257,24 @@ def _criticality_section(cell_id: str):
                            "is not on anyone's computed trend, gap or chokepoint"))
     src = "criticality.parquet"
     snap = str(c["computed_at"].iloc[0])[:10]
+    top_block = str(c["block_id"].iloc[0])
+    notes = ["Scores combine sub-scores by MAX with reason codes, never by "
+             "weighted blending — every score states why it is what it is."]
+    figures = []
+    # PLAN_C4 4.1 section 4 asks for "a rendered corridor map figure". Wider
+    # than the land inset: a trend corridor is a kilometres-long feature and a
+    # frame tight on the cell shows none of it.
+    fig, why = _figure(
+        "criticality_corridor", f"{cell_id} - criticality corridor",
+        f"Criticality scored on open cells around {top_block}. Brighter cells "
+        f"sit further along the neighbour's computed trend; the red marker is "
+        f"the target. A claim's own footprint carries no score by construction.",
+        cell_id, ("context", "criticality", "blocks"), pad=30.0, snapshot=snap,
+        block=top_block)
+    if fig:
+        figures.append(fig)
+    else:
+        notes.append(f"CORRIDOR FIGURE NOT RENDERED - {why}")
     return Section(
         key="criticality", title="Criticality",
         facts=[Fact(label="Best score", value=round(float(c["score"].max()), 3),
@@ -210,8 +289,8 @@ def _criticality_section(cell_id: str):
              "azimuth": r.trend_azimuth, "distance_m": r.distance_m,
              "reasons": ", ".join(json.loads(r.reason_codes))}
             for r in c.head(8).itertuples(index=False)]},
-        notes=["Scores combine sub-scores by MAX with reason codes, never by "
-               "weighted blending — every score states why it is what it is."])
+        figures=figures,
+        notes=notes)
 
 
 def _geology_section(cell_id: str, juris: str):

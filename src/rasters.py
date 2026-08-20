@@ -96,16 +96,34 @@ def _register(entry: dict) -> None:
 
 
 def ingest(src, code: str, juris: str = "FED", categorical: bool = False,
-           legend: dict | None = None, snapshot: str | None = None) -> Path:
+           legend: dict | None = None, snapshot: str | None = None,
+           assume_crs: str | None = None, crs_evidence: str | None = None) -> Path:
     """Convert `src` to a registered COG under processed/rasters/.
 
     Returns the COG path. Re-ingesting the same source is a no-op unless the
     source hash changed.
+
+    **`assume_crs` is for a CRS that is determined, not guessed.** A raster with
+    no CRS is normally refused, because inventing one silently misplaces every
+    value it holds. But publishers do ship untagged rasters whose CRS is
+    recoverable from evidence — the CMMI CD prospectivity GeoTIFF carries no CRS
+    while its MVT sibling, same release and same team, declares EPSG:4326 on a
+    grid with an identical size, transform and bounds (audit N3). Passing
+    `assume_crs` requires `crs_evidence`, which is stored in the registry, so the
+    assertion travels with the layer and can be argued with later. Without
+    evidence the refusal stands.
     """
     import rasterio
     from rasterio.shutil import copy as rio_copy
 
     src = Path(src)
+    # Validate arguments before touching the disk: a caller who passed an
+    # unevidenced CRS assertion should hear about that, not about whatever the
+    # filesystem says first.
+    if assume_crs and not crs_evidence:
+        raise ValueError(
+            f"assume_crs={assume_crs!r} given for {src.name} with no crs_evidence. "
+            f"An asserted CRS without a recorded reason is a guess with extra steps.")
     layer = f"{juris}__{code}__{src.stem}".replace(" ", "_").replace("-", "_")[:80]
     dst = COG_DIR / f"{layer}.tif"
     COG_DIR.mkdir(parents=True, exist_ok=True)
@@ -115,14 +133,39 @@ def ingest(src, code: str, juris: str = "FED", categorical: bool = False,
     src_hash = _sha256(src, limit=64 << 20)
     prior = next((e for e in _registry() if e["layer"] == layer), None)
     if prior and prior.get("source_hash") == src_hash and dst.exists():
-        print(f"   = {layer} unchanged")
-        return dst
+        # "Unchanged" is a claim about the source. Before acting on it, confirm
+        # the output still matches what the registry says about it — audit I1's
+        # lesson was that a skip decision resting on a record rather than on the
+        # file turns a repair into a silent no-op. Only the asserted CRS is
+        # re-checked here; it is the one property this function writes that the
+        # source cannot vouch for.
+        stale = False
+        if prior.get("crs_asserted"):
+            try:
+                import rasterio as _rio
+                with _rio.open(dst) as _out:
+                    stale = (_out.crs is None
+                             or _out.crs.to_string() != prior.get("crs"))
+            except Exception:
+                stale = True
+        if not stale:
+            print(f"   = {layer} unchanged")
+            return dst
+        print(f"   ! {layer}: registry claims crs={prior.get('crs')} but the COG "
+              f"on disk disagrees — re-ingesting")
 
     with rasterio.open(src) as ds:
-        if ds.crs is None:
-            raise ValueError(f"{src.name} has no CRS — refusing to guess one")
+        crs = ds.crs
+        asserted = False
+        if crs is None:
+            if not assume_crs:
+                raise ValueError(f"{src.name} has no CRS — refusing to guess one")
+            crs = rasterio.crs.CRS.from_string(assume_crs)
+            asserted = True
+            print(f"   ~ {src.name}: no CRS on the file; asserting {assume_crs} "
+                  f"— {crs_evidence}")
         meta = {
-            "crs": str(ds.crs),
+            "crs": str(crs),
             "width": ds.width, "height": ds.height, "count": ds.count,
             "dtype": ds.dtypes[0],
             "nodata": None if ds.nodata is None else float(ds.nodata),
@@ -132,8 +175,31 @@ def ingest(src, code: str, juris: str = "FED", categorical: bool = False,
         # Class codes must not be interpolated. `average` overviews on a
         # categorical raster produce values that are not any real class.
         resampling = "mode" if categorical else "average"
-        rio_copy(ds, dst, driver="COG", compress="DEFLATE",
-                 overview_resampling=resampling, BIGTIFF="IF_SAFER")
+        if asserted:
+            # Two things that do NOT work, both of which fail silently and leave
+            # the registry describing a file that does not exist:
+            #   rio_copy(ds, dst, crs=crs)  -> the kwarg is ignored outright
+            #   open(dst, "r+").crs = crs   -> the COG driver does not take it
+            # A WarpedVRT with src_crs == crs presents the same grid with the CRS
+            # attached and warps nothing: identical size, transform and bounds.
+            from rasterio.vrt import WarpedVRT
+            with WarpedVRT(ds, src_crs=crs, crs=crs) as vrt:
+                rio_copy(vrt, dst, driver="COG", compress="DEFLATE",
+                         overview_resampling=resampling, BIGTIFF="IF_SAFER")
+        else:
+            rio_copy(ds, dst, driver="COG", compress="DEFLATE",
+                     overview_resampling=resampling, BIGTIFF="IF_SAFER")
+
+    if asserted:
+        # Read it back. An assertion that does not survive to disk must fail the
+        # ingest, not be recorded as fact.
+        with rasterio.open(dst) as out:
+            if out.crs is None or out.crs.to_string() != crs.to_string():
+                dst.unlink(missing_ok=True)
+                raise RuntimeError(
+                    f"asserted CRS {crs.to_string()} did not survive to {dst.name} "
+                    f"(got {out.crs}); refusing to register a layer whose file "
+                    f"disagrees with its registry entry")
 
     entry = {
         "layer": layer, "code": code, "jurisdiction": juris,
@@ -144,6 +210,9 @@ def ingest(src, code: str, juris: str = "FED", categorical: bool = False,
         "cog_bytes": dst.stat().st_size,
         **meta,
     }
+    if asserted:
+        entry["crs_asserted"] = True
+        entry["crs_evidence"] = crs_evidence
     if legend:
         entry["legend"] = {str(k): v for k, v in sorted(legend.items())}
     _register(entry)

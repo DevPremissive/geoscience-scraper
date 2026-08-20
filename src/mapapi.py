@@ -872,10 +872,42 @@ def event_window(juris: str = "ON") -> dict:
 # Cell evidence — what the popover shows when someone clicks a hex.
 # ---------------------------------------------------------------------------
 
+def _feature_index(path: Path):
+    """`{feature: sorted value array}` for the whole store, built once per file.
+
+    The naive version masked the full frame once per feature on the cell:
+    66 features on a cell meant 66 scans of 10.7 M rows, 2.3 s per popover. The
+    feature store grew tenfold when C2.2 landed 60 geophysics features, which
+    turned an unnoticed inefficiency into the slowest thing in the viewer.
+
+    Sorted arrays make each percentile a `searchsorted`, and the index is keyed
+    on the parquet's mtime like every other cache here, so a nightly rebuild
+    invalidates it without a restart."""
+    import numpy as np
+
+    def build(p: Path):
+        df = _read_parquet(p)
+        if df is None or df.empty:
+            return {}, {}
+        # One pass, grouped, rather than one pass per feature.
+        idx = {}
+        for feat, grp in df.groupby("feature", sort=False)["value"]:
+            arr = grp.to_numpy(dtype="float64", copy=True)
+            arr = arr[~np.isnan(arr)]
+            arr.sort()
+            idx[feat] = arr
+        by_cell = {cid: g for cid, g in df.groupby("cell_id", sort=False)}
+        return idx, by_cell
+
+    return _cached(path, build, "featindex")
+
+
 def _feature_percentiles(cell_id: str, top_k: int = 12) -> dict:
     """Per-evidence-layer values against the regional distribution (PLAN_C4 4.1
     section 5). Percentile, not raw value: "0.42" means nothing to a reader,
     "94th percentile for Ontario" means something."""
+    import numpy as np
+
     if not FEATURES_DIR.exists():
         return {"available": False, "reason": "no feature store on disk"}
     fabs = sorted(p for p in FEATURES_DIR.iterdir() if p.is_dir())
@@ -886,20 +918,29 @@ def _feature_percentiles(cell_id: str, top_k: int = 12) -> dict:
                  if (s / "features.parquet").exists()), None)
     if path is None:
         return {"available": False, "reason": "no features.parquet in any snapshot"}
-    df = _read_parquet(path)
-    if df is None or df.empty:
+
+    built = _feature_index(path)
+    if not built:
         return {"available": False, "reason": "feature store is empty"}
-    mine = df[df["cell_id"] == cell_id]
-    if mine.empty:
+    idx, by_cell = built
+    mine = by_cell.get(cell_id)
+    if mine is None or mine.empty:
         return {"available": False, "reason": f"cell {cell_id} is not in the feature store",
                 "snapshot": path.parent.name}
+
     out = []
     for r in mine.itertuples(index=False):
-        pop = df.loc[df["feature"] == r.feature, "value"]
-        pct = float((pop <= r.value).mean() * 100) if len(pop) else None
+        pop = idx.get(r.feature)
+        if pop is None or not len(pop) or r.value != r.value:
+            pct, n = None, 0 if pop is None else len(pop)
+        else:
+            # `<= value` to match the previous definition exactly: the share of
+            # the population this cell is at or above.
+            n = len(pop)
+            pct = float(np.searchsorted(pop, r.value, side="right") / n * 100)
         out.append({"feature": r.feature, "value": float(r.value),
                     "percentile": None if pct is None else round(pct, 1),
-                    "n_cells_with_feature": int(len(pop))})
+                    "n_cells_with_feature": int(n)})
     out.sort(key=lambda d: (d["percentile"] is None, -(d["percentile"] or 0)))
     return {"available": True, "snapshot": path.parent.name,
             "fabric_version": path.parent.parent.name,

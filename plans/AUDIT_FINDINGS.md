@@ -1415,6 +1415,173 @@ Sundays, so their next attempt is 2026-08-23. That is cadence, not an outage.
 
 ---
 
+## N. C2.2 build findings (2026-08-20)
+
+C2.2 was the last Phase-1 item. The plan scoped it at half a day as a benchmark
+pull; it is closer to a day, and it is not mainly a benchmark.
+
+### N1. For Ontario, CMMI is not a benchmark — it is the geophysics modality
+
+PLAN_C2 2.2 lists three uses and puts "benchmark comparators" first. On this
+machine the second use dominates. Ontario's geophysics is empty in practice:
+FED `GEOPHYSICS` is blocked behind the GDR portal and needs a browser (C3.2,
+unbuilt, audit B3), and `ON_GEOPHYS` is 246 MB of proprietary Geosoft `.GRD`
+that no common driver reads. The CMMI grids are ordinary GeoTIFFs that cover the
+whole province.
+
+Fifteen rasters now grid onto the Ontario r7 fabric at **96–100% cell coverage**,
+contributing **60 features over all 164,577 cells**: gravity and its HGM, the
+30 km upward continuation and its HGM, magnetic anomaly, RTP, RTP-HGM, RTP-VD,
+deep-source separations, depth to LAB, depth to Moho, and satellite-gravity shape
+index. That is the modality gap in Master §6b's register closing without C3.2.
+
+The release also ships worm (multiscale edge) shapefiles and a continent-wide
+fault layer, harvested but not yet gridded — they are vector, so they need
+`gridify.dist_to`, not `rasters.zonal`.
+
+### N2. Two of the plan's premises about the release are wrong
+
+- **There is no sediment-thickness layer for US/Canada.** PLAN_C2 2.2 lists
+  "sediment-thickness and proximity layers". The release's depth products for
+  this region are LAB and Moho only; sediment thickness does not exist here under
+  any name. Third C2 plan premise to fail against the actual product, after CGMC's
+  legend (I6) and the corpus composition (K1).
+- **The prospectivity surfaces are Zn-Pb, and we do not ship a Zn-Pb model.**
+  "Published surfaces as benchmark comparators for every model this component
+  ships" cannot be satisfied as written: the published surfaces are
+  clastic-dominated and Mississippi-Valley-type Zn-Pb, our shipped model is
+  orogenic Au, and audit K3 already established Ontario is not an MVT province.
+  See N5 for what the comparison is actually good for.
+
+### N3. The CD prospectivity GeoTIFF ships with no CRS, and asserting one is not guessing
+
+`USCanada_Lawleyetal_CDModel.tif` carries no CRS. `rasters.ingest` refused it,
+correctly — inventing a CRS silently misplaces every value a raster holds.
+
+But it is determinable rather than unknown. Its MVT sibling, same release folder
+and same team, declares EPSG:4326 on a grid identical to full float precision:
+23005×10368, transform `(-180.002198652943, 0.005650762016448, 83.12553464295827,
+-0.005650762016448)`, bounds `(-180.0022, 24.5384, -50.0064, 83.1255)` — and
+those bounds are decimal degrees on their face.
+
+`ingest()` now takes `assume_crs=` **and requires `crs_evidence=`**, storing both
+in the registry so the assertion travels with the layer and can be argued with.
+An asserted CRS without a recorded reason is a guess with extra steps, and is
+refused.
+
+### N4. The registry recorded a CRS the file did not have
+
+Getting N3's assertion onto disk took three attempts, and the first two failed
+*silently*:
+
+- `rio_copy(ds, dst, crs=crs)` — the kwarg is ignored outright.
+- `rasterio.open(dst, "r+").crs = crs` — the COG driver does not take it.
+
+Both left the registry recording `crs: EPSG:4326` for a COG carrying no CRS at
+all. This is audit B3's shape exactly — the ledger said ZIP and the disk held
+HTML — reproduced by our own code inside a single function.
+
+What works is a `WarpedVRT` with `src_crs == crs`, which attaches the CRS and
+warps nothing. Three defences were added, because the failure mode is silence:
+the write is **read back** and the ingest fails if the assertion did not survive;
+the registry stores `crs_asserted` and the evidence; and the "source unchanged,
+skip" fast path now **re-checks an asserted CRS against the file** instead of
+trusting the record — audit I1's lesson, that a skip resting on a record rather
+than on the file turns a repair into a no-op, applied to a second function.
+
+### N5. Cross-system rank agreement is not a benchmark, but it is not noise
+
+Against the published surfaces, our orogenic-Au model scores:
+
+| published surface | Spearman ρ | top-decile overlap (chance 0.10) |
+|---|---:|---:|
+| CD Zn-Pb | +0.147 | 0.144 |
+| MVT Zn-Pb | **−0.502** | 0.024 |
+
+The MVT result is the informative one and it is **strongly negative, as it should
+be**. Orogenic Au is an Archean greenstone-belt system in the Superior Province;
+MVT Zn-Pb is a Phanerozoic carbonate-platform system in the Hudson Bay Lowland
+and southern Ontario. In Ontario those are disjoint terranes. A model that scored
+both the same ground highly would have learned something generic; ρ = −0.50 is
+evidence ours has learned terrane.
+
+That is a sanity check, not an accuracy measurement, and `cmmi.py` will not
+report it as one: `PUBLISHED_SYSTEMS` labels each surface with its deposit type,
+any cross-type pairing is printed as `cross-system reference` rather than
+`comparator`, and each carries a stated prior expectation so the number cannot be
+quoted as a score. A real benchmark for C2 needs a published *orogenic-Au*
+surface, which this release does not contain.
+
+### N6. The release grids geology onto H3 r7 — the same resolution as our fabric
+
+`Geology_H3Grid_Canada` is 1,820,346 cells of bedrock geology aggregated onto
+**H3 resolution 7**, which is our modelling fabric's resolution exactly. PLAN_C2
+2.2 asked for "a reference feature matrix to validate `gridify.py` aggregation
+choices"; what exists is far better — an independent implementation of the same
+operation on the same grid, cell for cell, with no resampling in between.
+
+**Cell sets — the fabric is validated.** Of our 164,577 Ontario r7 cells,
+164,220 (99.8%) are in their Ontario set. They carry 20,702 we do not; **20,280
+of those (98.0%) have centroids inside the major lakes `fabric.py` deliberately
+clips**. That is not a disagreement, it is two defensible answers: we exclude
+open water because every feature this system computes is undefined there, and
+CMMI carries a lithology under the lake. Setting the water aside, cell-set
+agreement is **99.53%**, with 422 of theirs and 357 of ours unexplained —
+borderline cells where two centroid tests fall either side of a boundary.
+
+**Majority lithology — inconclusive, and reported as such.** Coarse-class
+agreement (intrusive / extrusive / sedimentary / metamorphic) is 55.9% over
+101,944 cells. That number does not measure our aggregation:
+
+- **46% of all disagreement is one cell of the confusion matrix** — ours
+  `metamorphic` against theirs `intrusive`, 20,509 cells. A systematic one-way
+  swap is a taxonomy boundary, not an aggregation error: Superior Province
+  granitoids are filed as orthogneiss and migmatite by CGMC and as intrusive by
+  CMMI. The crosswalk is doing more work than the aggregation is.
+- Agreement is **66.1% where the reference reports no lithological contact in the
+  cell and 24.0% where it reports one**. Majority is ill-defined exactly where
+  two units compete for a cell, so disagreement concentrating there is what two
+  *correct* implementations would do.
+
+`validate_gridify()` prints both diagnostics and records
+`verdict: inconclusive` rather than emitting a bare 55.9% for someone to quote as
+a pass or a failure.
+
+### N7. `write_features` said "append" and overwrote — a second producer erased the first
+
+`gridify.write_features` was written when one build pass produced the entire
+feature matrix. C2.2 is the second producer, and gridding the CMMI rasters into a
+new snapshot left it holding **60 geophysics features and none of the 239 geology
+ones**. Nothing errored. Every consumer that reads the newest snapshot — the
+dossier's evidence table, the viewer's popover, `_feature_percentiles` — would
+have reported bedrock, faults and drillhole density as simply absent.
+
+It was caught because C2.2's own lithology validation went looking for
+`bedrock__dominant__*` and found none.
+
+Two changes: frames are merged into any matrix already in the snapshot, and
+`carry_forward=<prior snapshot>` copies features the run did not recompute,
+recording `carried_from`, `carried_features` and `computed_features` in the
+manifest. Carried values are stale by construction, so they are **named** rather
+than blended invisibly. The 2026-08-20 snapshot now holds 299 features: 60
+computed, 239 carried from 2026-08-17.
+
+The general point: **a docstring is not an invariant.** This one had promised
+"append" since it was written, and the first caller that depended on the promise
+found it false.
+
+### N8. The publisher's checksums are worth using
+
+Every ScienceBase file object carries an MD5. The harvest ledger records our own
+sha256, which answers "the same bytes as last time" but not "the bytes USGS meant
+to serve" — a truncated download has a perfectly consistent sha256 of its own.
+`cmmi.py --verify` checks the harvest against the publisher's digests; all 24
+files pass. Any source that publishes checksums should be verified against them
+rather than only against ourselves.
+
+
+---
+
 ## Change log
 
 - **2026-08-13** — initial audit; all findings above recorded after a second challenge pass. Six first-pass conclusions were corrected: B1 strengthened, B2 reframed, B4/D3/D5-Chroma downgraded, A2 qualified.
@@ -1422,3 +1589,4 @@ Sundays, so their next attempt is 2026-08-23. That is cadence, not an outage.
 - **2026-08-14 (execution pass)** — section I, found while running C0.1 rather than by auditing: the harvest skip logic would have made the re-harvest a silent no-op (I1); two of the LIO layer ids the plan lists are group layers (I2); gap #15 `SK_SMDI` diagnosed as our own hardcoded `layers=1`, fix blocked on an SK service outage (I3); one further HTML payload found by `verify_harvest.py` (I4). B2's 1,016 ogsearth rows reconciled from disk, sha-verified — no data lost, as predicted.
 - **2026-08-18 (C6.2 pass)** — section L: the SEDAR+ corpus C3.5 planned to fetch is already on disk (1,401 issuers, 658,812 filings), so C6.2 makes no network call; Ontario publishes no claim transfers but 110,206 geometric pickups; two measurement traps (r7 co-occurrence, unparsed HOLDER) and one threshold-from-a-prior corrected; 23 captured issuer profiles found to be stubs.
 - **2026-08-18 (C4.2 pass)** — section M: C6.2 had been built ahead of C2.2 and C4.2, and the handoff's C6.3 recommendation could not have met its own acceptance without a viewer (M0); `blocks.geometry_wkt` is EPSG:3978 and silently matched nothing against a lon/lat envelope (M1); a parquet cache keyed on less than it stored failed only under the live server's call order (M2); the event scrubber spanned Yukon's 1899 paper record while its layer drew Ontario (M3); `update_all.py` ran a national harvest on import (M4); the viewer and its figures now make no outbound request at all (M5); H3 parent aggregation defers the MVT pipeline (M6); and Nunavut, recorded dead upstream on 2026-08-17, was re-harvested by the daily timer on 2026-08-18 with owners, staking dates and retained cancellations (M7).
+- **2026-08-20 (C2.2 pass)** — section N: for Ontario the CMMI release is the geophysics modality rather than a benchmark, closing that gap without C3.2 (N1); the plan's sediment-thickness layer does not exist and the published surfaces are Zn-Pb against our orogenic-Au model (N2); the CD GeoTIFF ships with no CRS, so `ingest()` now takes an evidenced assertion (N3) after two silent failures left the registry describing a file that did not exist (N4); cross-system rank agreement is reported as a sanity check, not a score, and ρ=−0.50 against MVT is the geologically correct sign (N5); the release's own H3 r7 geology grid validates our fabric at 99.53% once deliberate lake clipping is set aside, while the lithology comparison is inconclusive because the taxonomy crosswalk dominates (N6); `write_features` said append and overwrote, and C2.2 as the second producer erased the 239 geology features until it was fixed (N7); publisher MD5s are now verified (N8).

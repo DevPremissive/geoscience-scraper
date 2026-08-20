@@ -205,11 +205,29 @@ def dist_to(gdf, cells, prefix: str = "dist"):
 # --------------------------------------------------------------------------
 
 def write_features(frames, fabric_version: str, snapshot: str, inputs: list,
-                   root: Path | None = None) -> Path:
-    """Append long-format frames to the versioned feature store.
+                   root: Path | None = None, carry_forward: str | None = None) -> Path:
+    """Write long-format frames into the versioned feature store.
 
     `inputs` is a list of dicts describing every source that contributed, so the
     manifest can answer "what exactly was this matrix computed from".
+
+    **A snapshot must hold the complete matrix as of its date.** This function
+    used to write only the frames it was handed, which is fine while one build
+    pass produces everything and silently destructive the moment a second
+    producer appears. C2.2 was that second producer: gridding the CMMI rasters
+    into a new snapshot left it holding 60 geophysics features and none of the
+    239 geology ones, and every consumer that reads the newest snapshot — the
+    dossier's evidence table, the viewer's popover — would have reported the
+    geology as simply absent.
+
+    Two behaviours close that:
+
+      * frames are **merged into any matrix already in this snapshot**, with the
+        incoming values winning for features they recompute;
+      * `carry_forward=<prior snapshot>` copies features from an earlier snapshot
+        that this run did not recompute, recording in the manifest which features
+        were carried and where from. Carried values are stale by construction, so
+        they are named rather than blended invisibly.
     """
     import pandas as pd
 
@@ -219,6 +237,30 @@ def write_features(frames, fabric_version: str, snapshot: str, inputs: list,
 
     df = pd.concat([f for f in frames if f is not None and not f.empty],
                    ignore_index=True) if frames else pd.DataFrame(columns=LONG_COLS)
+    fresh = set(df["feature"].unique()) if len(df) else set()
+
+    carried: list[str] = []
+    prior_parts = []
+    existing = out_dir / "features.parquet"
+    if existing.exists():
+        prior_parts.append((pd.read_parquet(existing), snapshot))
+    if carry_forward:
+        src = root / fabric_version / carry_forward / "features.parquet"
+        if src.exists():
+            prior_parts.append((pd.read_parquet(src), carry_forward))
+        else:
+            print(f"  ! carry_forward snapshot {carry_forward} has no "
+                  f"features.parquet — nothing carried", file=sys.stderr)
+    for prior, origin in prior_parts:
+        keep = prior[~prior["feature"].isin(fresh)]
+        if len(keep):
+            carried += sorted(set(keep["feature"]) - set(df["feature"]) if len(df)
+                              else set(keep["feature"]))
+            df = pd.concat([df, keep[LONG_COLS]], ignore_index=True)
+            fresh |= set(keep["feature"])
+    carried = sorted(set(carried))
+    if carried:
+        print(f"  carried forward {len(carried)} features not recomputed by this run")
     # Deterministic on disk: a re-run with identical inputs must produce an
     # identical file, which is the C0.5 acceptance check.
     df = df.sort_values(LONG_COLS, kind="mergesort").reset_index(drop=True)
@@ -235,6 +277,10 @@ def write_features(frames, fabric_version: str, snapshot: str, inputs: list,
         "feature_count": int(df["feature"].nunique()),
         "cells": int(df["cell_id"].nunique()),
         "inputs": inputs,
+        "carried_from": carry_forward,
+        "carried_features": carried,
+        "computed_features": sorted(f for f in df["feature"].unique()
+                                    if f not in set(carried)),
     }, indent=2), encoding="utf-8")
 
     # C0.6: no `latest`. Enforced, not merely asked for.

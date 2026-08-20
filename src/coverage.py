@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import sqlite3
 import sys
 from pathlib import Path
@@ -218,6 +219,27 @@ def _tables() -> dict:
     return out
 
 
+def _rasters() -> dict:
+    """{code: n_cogs} from the raster registry.
+
+    Without this, every raster source reads as RAW ONLY: `status_for` only knew
+    about `geo.gpkg` and `processed/tables/`, and a COG lives in neither. CGMC —
+    the national lithology raster, ingested since C0.4 and gridded onto the
+    fabric — has been reported as "payload on disk but nothing lifted into a
+    store" for as long as this file has been generated. COVERAGE.md exists to say
+    what is actually on disk, so a whole modality it cannot see is a defect in
+    the report, not a detail."""
+    reg = C.PROCESSED_DIR / "rasters" / "rasters.json"
+    if not reg.exists():
+        return {}
+    entries = json.loads(reg.read_text())
+    out = {}
+    for e in entries:
+        if Path(e.get("path", "")).exists():
+            out[e.get("code")] = out.get(e.get("code"), 0) + 1
+    return out
+
+
 def _blocked() -> dict:
     """{code: reason} for sources the registry marks unfetchable."""
     out = {}
@@ -227,14 +249,21 @@ def _blocked() -> dict:
     return out
 
 
-def status_for(code, harvested, spatial, tables, blocked) -> str:
-    """One honest word about what is actually on disk for this code."""
+def status_for(code, harvested, spatial, tables, blocked, rasters=None) -> str:
+    """One honest word about what is actually on disk for this code.
+
+    A code can be lifted into more than one store — CMMI ships GeoTIFFs and
+    shapefiles under the same code — so the most-processed state wins and the
+    counts columns carry the detail."""
+    rasters = rasters or {}
     if code in blocked:
         return f"BLOCKED ({blocked[code]})"
     if code not in harvested:
         return "NOT HARVESTED"
     if code in spatial:
         return "SPATIAL"
+    if code in rasters:
+        return "RASTER"
     if code in tables:
         return "TABULAR"
     return "RAW ONLY"
@@ -266,12 +295,14 @@ def write_markdown(path=None) -> Path:
         "|---|---|",
         "| `SPATIAL` | harvested and present in `geo.gpkg` as queryable geometry |",
         "| `TABULAR` | harvested and present in `processed/tables/` as Parquet |",
+        "| `RASTER` | harvested and registered as a COG in `processed/rasters/` |",
         "| `RAW ONLY` | payload on disk but nothing lifted into a store yet |",
         "| `NOT HARVESTED` | declared in `sources.py`, never fetched |",
         "| `BLOCKED` | known unfetchable through this connector; see registry notes |",
         "",
     ]
 
+    rasters = _rasters()
     tot_spatial = sum(spatial.values())
     lines += [
         "## Totals",
@@ -280,6 +311,7 @@ def write_markdown(path=None) -> Path:
         f"{sum(len(v) for v in expected.values())}** declared",
         f"- **{tot_spatial:,}** features across **{len(spatial)}** codes in `geo.gpkg`",
         f"- **{sum(tables.values())}** Parquet tables across **{len(tables)}** codes",
+        f"- **{sum(rasters.values())}** registered COGs across **{len(rasters)}** codes",
         f"- **{sum(h['bytes'] for h in harvested.values())/1e9:.1f} GB** recorded in the ledger",
         "",
     ]
@@ -291,16 +323,18 @@ def write_markdown(path=None) -> Path:
         if not codes:
             continue
         lines += [f"## {juris}", "",
-                  "| Code | Status | Features | Tables | Latest | Size |",
-                  "|---|---|---:|---:|---|---:|"]
+                  "| Code | Status | Features | Tables | COGs | Latest | Size |",
+                  "|---|---|---:|---:|---:|---|---:|"]
         for code in codes:
             h = harvested.get(code)
-            st = status_for(code, harvested, spatial, tables, blocked)
+            st = status_for(code, harvested, spatial, tables, blocked, rasters)
             feats = f"{spatial[code]:,}" if code in spatial else ""
             tbls = str(tables[code]) if code in tables else ""
+            cogs = str(rasters[code]) if code in rasters else ""
             latest = h["latest"] if h else ""
             size = fmt_bytes(h["bytes"]) if h and h["bytes"] else ""
-            lines.append(f"| {code} | {st} | {feats} | {tbls} | {latest} | {size} |")
+            lines.append(f"| {code} | {st} | {feats} | {tbls} | {cogs} | "
+                         f"{latest} | {size} |")
         lines.append("")
 
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")

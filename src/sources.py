@@ -708,7 +708,13 @@ PROVINCES = {
 }
 
 # ---------------------------------------------------------------------------
-# US FEDERAL DATA SOURCES (non-Canadian, included for reference)
+# US FEDERAL DATA SOURCES
+#
+# Organized by PUBLISHER, not by coverage. MRDS and USMIN are US-only and are
+# here for reference (audit K1: MRDS is 87% US, 1,551 Canadian records). CMMI is
+# not — it is a USGS release whose grids explicitly cover Canada, and for
+# Ontario it is currently the ONLY readable geophysical evidence there is. It
+# sits under "US" because USGS published it; read its notes for what it covers.
 # ---------------------------------------------------------------------------
 US_SOURCES = {
     "MRDS": {
@@ -746,6 +752,110 @@ US_SOURCES["USMIN"] = {
              "POLYGON = mine/site outlines. POINT = occurrences. "
              "NOT mining claims boundaries. BLM Hub at "
              "gbp-blm-egis.hub.arcgis.com has no mining claim datasets.",
+}
+
+#: USGS Critical Minerals Mapping Initiative — "National-Scale Geophysical,
+#: Geologic, and Mineral Resource Data and Grids for the United States, Canada,
+#: and Australia" (Lawley et al.), ScienceBase item 6193e9f3d34eb622f68f13a5.
+#:
+#: **Why this matters more here than the plan expected.** PLAN_C2 2.2 scoped this
+#: as a benchmark pull. For Ontario it is also the geophysics modality itself:
+#: FED GEOPHYSICS is blocked behind the GDR portal and needs a browser (C3.2),
+#: and ON_GEOPHYS is 246 MB of proprietary Geosoft .GRD that no common driver
+#: reads. These grids are ordinary GeoTIFFs covering the whole country.
+#:
+#: Selection is by file name; the connector resolves the child item and the
+#: current download URL at runtime (Master §9 rule 2 — the URLs are
+#: content-addressed and change on re-upload).
+US_SOURCES["CMMI"] = {
+    "type": "sciencebase",
+    "portal": "https://www.sciencebase.gov/catalog",
+    "parent": "6193e9f3d34eb622f68f13a5",
+    "select": {
+        "CMMI_GRAVITY": {
+            "files": [
+                "GeophysicsGravity_USCanada.zip",
+                "GeophysicsGravity_HGM_USCanada.zip",
+                "GeophysicsGravity_Up30km_USCanada.zip",
+                "GeophysicsGravity_Up30km_HGM_USCanada.zip",
+                "DeepGravitySources_Worms_USCanada.zip",
+                "ShallowGravitySources_Worms_USCanada.zip",
+            ],
+            "notes": "Isostatic residual gravity, its horizontal-gradient magnitude, "
+                     "the 30 km upward continuation and its HGM, plus deep/shallow "
+                     "worm (multiscale edge) products. HGM ridges track density "
+                     "contacts — the plan's 'gridded gravity variants + HGM/worms'.",
+        },
+        "CMMI_MAGNETIC": {
+            "files": [
+                "GeophysicsMag_USCanada.zip",
+                "GeophysicsMag_RTP_USCanada.zip",
+                "GeophysicsMag_RTP_HGM_USCanada.zip",
+                "GeophysicsMag_RTP_VD_USCanada.zip",
+                "GeophysicsMagRTP_DeepSources_USCanada.zip",
+                "GeophysicsMagRTP_HGM_DeepSources_USCanada.zip",
+                "DeepMagSources_Worms_USCanada.zip",
+                "ShallowMagSources_Worms_USCanada.zip",
+            ],
+            "notes": "Magnetic anomaly, reduced-to-pole, RTP-HGM, RTP vertical "
+                     "derivative, deep-source separations and worms. 636 MB, the "
+                     "bulk of the release.",
+        },
+        "CMMI_LAB": {
+            "files": ["GeophysicsLAB_USCanada.zip"],
+            "notes": "Depth to the lithosphere-asthenosphere boundary. Lawley et al. "
+                     "found LAB depth among the strongest predictors for sediment-hosted "
+                     "systems; it is a lithospheric-architecture covariate, not a local one.",
+        },
+        "CMMI_MOHO": {
+            "files": ["GeophysicsMoho_USCanada.zip"],
+            "notes": "Depth to Moho, from the same seismic compilation as LAB.",
+        },
+        "CMMI_SATGRAV": {
+            "files": ["GeophysicsSatelliteGravity_ShapeIndex_USCanada.zip"],
+            "notes": "Shape index from satellite gravity — curvature classification of "
+                     "the gravity field, independent of the terrestrial compilation.",
+        },
+        "CMMI_FAULTS": {
+            "files": ["GeologyFaults_USCanada.zip"],
+            "notes": "Fault shapefiles, continent-wide and consistently attributed. "
+                     "A cross-check on the per-province fault layers C0 already holds, "
+                     "and the source of a distance-to-fault feature outside Ontario.",
+        },
+        "CMMI_PROSPECTIVITY": {
+            "files": [
+                "USCanada_Lawleyetal_CDModel.zip",
+                "USCanada_Lawleyetal_MVTModel.zip",
+            ],
+            "notes": "The published clastic-dominated and Mississippi-Valley-type Zn-Pb "
+                     "prospectivity surfaces. NOTE the deposit type: these are NOT a "
+                     "comparator for an orogenic-Au model (audit K3 — Ontario is not an "
+                     "MVT province). They are a methodological reference and an "
+                     "independent surface to check gridify against.",
+        },
+        "CMMI_GEOLOGY_H3": {
+            "files": ["Geology_H3Grid_Canada.zip", "CMMI_Classification.csv"],
+            "notes": "Geology already aggregated onto H3 cells for Canada by another "
+                     "team — exactly the 'reference feature matrix to validate "
+                     "gridify.py aggregation choices' PLAN_C2 2.2 asks for, and the only "
+                     "independent check on our majority-area logic that exists. "
+                     "Note the file is named Canada, not USCanada.",
+        },
+        "CMMI_OCCURRENCES": {
+            "files": [
+                "GeologyMineralOccurrences_USCanada_Australia.csv",
+                "GeologyMineralOccurrences_DataDictionary_USCanada_Australia.csv",
+            ],
+            "notes": "Basin-hosted CD/SEDEX and MVT Zn-Pb deposits and prospects, "
+                     "curated with a deposit-type crosswalk. Feeds C2.1 labels where "
+                     "MRDS is thin on Canada (audit K1).",
+        },
+    },
+    "notes": "USGS CMMI data release, ~1.25 GB across the US/Canada files selected here. "
+             "Public domain (USGS). The release also ships Australia and CONUS-only "
+             "variants, deliberately not selected. NO sediment-thickness layer exists for "
+             "US/Canada despite PLAN_C2 2.2 listing one — see audit N. Rasters are "
+             "GeoTIFF inside ZIPs; process/ingest unzips before rasters.py sees them.",
 }
 
 # ---------------------------------------------------------------------------
@@ -804,7 +914,15 @@ _TENURE_EXCLUDED = {
 }
 
 #: Monthly / on-demand. Large, slow-changing.
-RASTER_CODES = {"CGMC", "ON_GEOPHYS"}
+#:
+#: The CMMI codes are a published, frozen USGS data release (2022, metadata
+#: last touched 2025-03). Re-checking 1.25 GB daily would be pure noise, and
+#: the connector keys change detection off each file's dateUploaded, so a
+#: genuine republication is still caught on the monthly pass.
+RASTER_CODES = {"CGMC", "ON_GEOPHYS",
+                "CMMI_GRAVITY", "CMMI_MAGNETIC", "CMMI_LAB", "CMMI_MOHO",
+                "CMMI_SATGRAV", "CMMI_FAULTS", "CMMI_PROSPECTIVITY",
+                "CMMI_GEOLOGY_H3", "CMMI_OCCURRENCES"}
 
 CLASSES = ("tenure", "geoscience", "rasters")
 

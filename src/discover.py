@@ -16,7 +16,7 @@ import argparse, json, sys
 
 import config as C
 import sources as S
-from connectors import ckan, arcgis, wfs, ogsearth, es_scroll
+from connectors import ckan, arcgis, wfs, ogsearth, es_scroll, sciencebase
 
 
 def spec_codes(spec) -> list:
@@ -32,6 +32,8 @@ def spec_codes(spec) -> list:
         return list(spec.get("resources") or {})
     if t == "es_scroll":
         return list(spec.get("indexes") or {})
+    if t == "sciencebase":
+        return list(spec.get("select") or {})
     if t == "scrape":
         return [spec.get("code")] if spec.get("code") else []
     return []
@@ -96,6 +98,8 @@ def discover_all(only=None, cls=None):
                         "_es_query": res.get("query", {"match_all": {}}),
                         "_es_page_size": spec.get("page_size", 1000),
                     })
+            elif ctype == "sciencebase":
+                inv.extend(sciencebase.discover(spec, juris))
             elif ctype == "scrape":
                 inv.append({"jurisdiction": juris, "connector": "scrape",
                             "code": spec.get("code", f"{juris}_SCRAPE"),

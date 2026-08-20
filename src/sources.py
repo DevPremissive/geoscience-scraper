@@ -459,20 +459,41 @@ PROVINCES = {
             "type": "arcgis",
             "portal": "https://geohub.saskatchewan.ca",
             "rest":   "https://gis.saskatchewan.ca/egis/rest/services/Economy",
-            "items": {
-                # VERIFIED hub item id for the Mineral Deposits Index (SMDI spatial):
-                "SK_SMDI": "2ba80b329aad4018b6eacd56220dc10b",
-            },
+            "items": {},
+            #: All four live on ONE FeatureServer, and which sub-layer you take
+            #: is the whole ballgame (audit I3). Enumerated 2026-08-20 once the
+            #: `SITE_NOT_INITIALIZED` outage cleared:
+            #:     1 Mine Locations                          140
+            #:     2 Mineral Deposits Index (SMDI)         6,012
+            #:     3 Minerals and Quaternary Drillholes    33,490
+            #:     5 Mineral Resource Assessment           2,664
+            #: SK_SMDI pointed at 1 and reported 140 producing/past-producing
+            #: mines as if they were a deposit index. Taken through the REST
+            #: FeatureServer rather than the Hub download API: same data, and it
+            #: uses the paged `arcgis_layer` path instead of a one-shot download.
             "layers": {
                 "SK_MINERAL_EXPLORATION":
                     "https://gis.saskatchewan.ca/egis/rest/services/Economy/"
                     "Mineral_Exploration/FeatureServer/1",
+                "SK_SMDI":
+                    "https://gis.saskatchewan.ca/egis/rest/services/Economy/"
+                    "Mineral_Exploration/FeatureServer/2",
+                "SK_DRILLHOLE":
+                    "https://gis.saskatchewan.ca/egis/rest/services/Economy/"
+                    "Mineral_Exploration/FeatureServer/3",
             },
             "notes": "NOTE: the Perplexity 'MARS' name is wrong. Correct systems: "
-                     "SMDI (deposit index, spatial above) + SMAD (assessment files, PDFs/ZIPs "
-                     "via the Mining & Petroleum GeoAtlas ZIP REQUESTS). Hub item download: "
-                     "geohub.saskatchewan.ca/api/download/v1/items/<id>/geojson?layers=1 "
-                     "(or /csv). All SK datasets come from one Enterprise GIS warehouse.",
+                     "SMDI (deposit index) + SMAD (assessment files, PDFs/ZIPs via the "
+                     "Mining & Petroleum GeoAtlas ZIP REQUESTS). All SK datasets come from "
+                     "one Enterprise GIS warehouse. "
+                     "SK_MINERAL_EXPLORATION is sub-layer 1, 'Mine Locations' — 140 rows is "
+                     "CORRECT for it, and its name oversells what it holds. The deposit "
+                     "index is sub-layer 2 (SK_SMDI, 6,012). Sub-layer 5 'Mineral Resource "
+                     "Assessment' (2,664) is enumerated but not registered — add it if a "
+                     "use appears. The service returned 500 SITE_NOT_INITIALIZED through "
+                     "2026-08-17 and was back by 2026-08-20; the Hub download API "
+                     "(geohub.saskatchewan.ca/api/download/v1/items/<id>/geojson?layers=N) "
+                     "still works but the REST FeatureServer is the better path.",
         },
         "scrape": {
             "type": "scrape",

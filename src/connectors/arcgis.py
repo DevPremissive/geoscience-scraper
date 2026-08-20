@@ -49,15 +49,33 @@ def discover(spec: dict, jurisdiction: str) -> list[dict]:
         })
 
     # --- ArcGIS Hub download items ----------------------------------------
+    #
+    # The sub-layer index used to be hardcoded to 1 here, which is how
+    # `SK_SMDI` came to hold 140 rows: sub-layer 1 of that item is "Mine
+    # Locations" and the Mineral Deposits Index it was supposed to be is
+    # sub-layer 2, with 6,012. The count was implausible for two months and the
+    # cause was ours, not the publisher's (audit I3).
+    #
+    # An item may therefore be declared either way:
+    #     "CODE": "<item_id>"                       -> sub-layer 1, as before
+    #     "CODE": {"item": "<id>", "layers": 2}     -> explicit
     portal = (spec.get("portal") or "").rstrip("/")
-    for code, item_id in (spec.get("items") or {}).items():
-        url = f"{portal}/api/download/v1/items/{item_id}/geojson?layers=1"
+    for code, decl in (spec.get("items") or {}).items():
+        if isinstance(decl, dict):
+            item_id = decl.get("item") or decl.get("id")
+            layer = decl.get("layers", 1)
+        else:
+            item_id, layer = decl, 1
+        if not item_id:
+            print(f"  ! {jurisdiction}/{code}: hub item declares no id", file=sys.stderr)
+            continue
+        url = f"{portal}/api/download/v1/items/{item_id}/geojson?layers={layer}"
         out.append({
             "jurisdiction": jurisdiction, "connector": "arcgis_hub",
             "code": code, "dataset": code, "resource_id": item_id,
             "resource_name": code, "format": "geojson",
             "url": url, "last_modified": "", "size": None,
-            "license": None, "portal": portal,
+            "license": None, "portal": portal, "sub_layer": layer,
         })
         time.sleep(C.REQUEST_GAP)
     return out

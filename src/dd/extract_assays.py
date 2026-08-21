@@ -179,15 +179,63 @@ def extract_hole(tid: str, hole: dict, k: int = 8) -> dict:
     if obj.get("verdict") not in VERDICTS:
         obj["verdict"] = "ambiguous"
         obj["confidence"] = "low"
-    # The quote must actually be on the page it claims — same discipline as C5.1.
-    q, pg = obj.get("verdict_quote"), obj.get("page")
+    # DERIVE the page; never ask for it.
+    #
+    # The 2026-08-21 review found wrong page numbers on 4 of 18 rows — the
+    # largest single failure class, larger than misread figures, and not an OCR
+    # problem at all. The model was being handed chunks labelled `[p.N]` and
+    # asked to report which page its quote came from, which is a question it can
+    # get wrong. We already know the answer: every chunk carries its true page
+    # in metadata. So find the chunk that actually contains the quote and take
+    # the page from there. A citation should never be a model output.
+    q = obj.get("verdict_quote")
+    model_page = obj.get("page")
+    obj["page_reported_by_model"] = model_page
     obj["quote_verified"] = None
-    if q and pg:
-        norm = lambda t: re.sub(r"[^a-z0-9./%+]+", " ", (t or "").lower()).strip()
-        page_text = next((c["text"] for c in chunks if c["page"] == pg), "")
-        obj["quote_verified"] = bool(page_text) and norm(q)[:60] in norm(page_text)
-        if obj["quote_verified"] is False:
+    obj["page_source"] = None
+    norm = lambda t: re.sub(r"[^a-z0-9./%+]+", " ", (t or "").lower()).strip()
+    if q:
+        nq = norm(q)[:60]
+        hit = next((c for c in chunks if nq and nq in norm(c["text"])), None)
+        if hit is not None:
+            obj["page"] = hit["page"]
+            obj["quote_verified"] = True
+            obj["page_source"] = "derived from the chunk containing the quote"
+            if model_page not in (None, hit["page"]):
+                obj["page_corrected_from"] = model_page
+        else:
+            # The quote is in none of the excerpts, so it was not copied from
+            # them. That is a fabrication signal, not a page problem.
+            obj["quote_verified"] = False
             obj["confidence"] = "low"
+            obj["page_source"] = "model-reported; quote found in no excerpt"
+
+    # Attribution: the note must be about THIS hole. The review found one row
+    # where GE-54 carried a sentence about GE-55.
+    # Attribution. The review found GE-54 carrying a sentence about GE-55, so
+    # the question worth asking is not "does the quote name this hole" —
+    # plenty of legitimate quotes say "the hole intersected", and that check
+    # fired on 4 of 6 rows, which makes it noise. The question is whether the
+    # quote names a DIFFERENT hole from the same programme. That is the actual
+    # failure and it is rare enough to be worth flagging.
+    name = (hole.get("COMPANY_HOLE_IDENT") or hole.get("HOLE_IDENT") or "").strip()
+    obj["hole_named_in_quote"] = None
+    obj["other_holes_in_quote"] = None
+    if name and q:
+        obj["hole_named_in_quote"] = name.lower() in q.lower()
+        # Hole ids in this corpus look like GE-54, H89-36, CB-111, K-88-32.
+        # Case-SENSITIVE and hyphen-required. Without both, "to 553" parses as
+        # a hole id and the warning fires on almost everything.
+        ids = set(re.findall(r"\b[A-Z]{1,3}\d{0,2}-\d{1,3}[A-Z]?\b", q))
+        others = sorted({i for i in ids
+                         if i.replace(" ", "-").lower() != name.replace(" ", "-").lower()
+                         and not obj["hole_named_in_quote"]})
+        if others:
+            obj["other_holes_in_quote"] = others
+            obj["confidence"] = "low"
+            obj["attribution_warning"] = (
+                f"the quote names {', '.join(others[:3])} but not {name} — it "
+                f"may describe a different hole in the same programme")
     return obj
 
 
@@ -268,6 +316,11 @@ def run_batch(max_reports: int = 14, min_holes: int = 5, radius_km: float = 0.0,
                 "verdict": r.get("verdict"), "verdict_quote": r.get("verdict_quote"),
                 "page": r.get("page"), "confidence": r.get("confidence"),
                 "quote_verified": r.get("quote_verified"),
+                "page_source": r.get("page_source"),
+                "page_corrected_from": r.get("page_corrected_from"),
+                "hole_named_in_quote": r.get("hole_named_in_quote"),
+                "other_holes_in_quote": json.dumps(r.get("other_holes_in_quote") or []),
+                "attribution_warning": r.get("attribution_warning"),
                 # Binding: nothing self-promotes into training (PLAN_C5 5.2 step 5).
                 "review_status": "auto", "training_eligible": False,
                 "reviewed_by": None, "review_verdict": None,

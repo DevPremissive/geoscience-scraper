@@ -478,6 +478,80 @@ def _buyers_section(cell_id: str, juris: str):
         ])
 
 
+def _history_section(cell_id: str, juris: str):
+    """Dossier section 7 — the C5.1 due-diligence answers, with their citations.
+
+    Reads the stored `answers.json` rather than running the question set: a
+    dossier regeneration must reproduce the same answers, and re-querying a
+    model would quietly change the document. Run
+    `python -m dd.ingest --cell X && python -m dd.rag --cell X` to refresh."""
+    tid = f"{juris}-{cell_id}"
+    p = C.PROCESSED_DIR / "dd" / f"{tid}.answers.json"
+    if not p.exists():
+        return Section(
+            key="history", title="History (reports)", available=False,
+            unavailable_reason=(
+                "no due-diligence corpus for this target. Build one with "
+                f"`python -m dd.ingest --cell {cell_id}` (C3.4 fetch + C5.1 "
+                f"ingest) then `python -m dd.rag --cell {cell_id}`"))
+    d = json.loads(p.read_text())
+    corpus = d.get("corpus", {})
+    cov = d.get("coverage") or {}
+    src = f"dd:{d.get('collection')}"
+    snap = str(p.stat().st_mtime_ns)[:0] or dt.date.today().isoformat()
+
+    facts = [
+        Fact(label="Reports ingested", value=corpus.get("reports"),
+             provenance=_prov(src, snap)),
+        Fact(label="Pages", value=corpus.get("pages"), provenance=_prov(src, snap)),
+        Fact(label="Chunks embedded", value=corpus.get("chunks"),
+             provenance=_prov(src, snap)),
+        Fact(label="Answered", value=f"{sum(1 for a in d['answers'] if a.get('found'))} of "
+                                     f"{len(d['answers'])} questions",
+             provenance=_prov(src, snap)),
+    ]
+    if cov.get("missing"):
+        yr = cov.get("missing_year_range")
+        facts.append(Fact(
+            label="Reports NOT retrieved", value=cov["missing"],
+            provenance=_prov(src, snap),
+            note=("Ontario's blob store serves the pre-2000 scanned era; these "
+                  + (f"are dated {yr[0]}-{yr[1]}" if yr else "could not be fetched")
+                  + ". Their absence is a retrieval gap, not evidence that "
+                    "nothing happened: "
+                  + ", ".join(cov.get("missing_ids", [])[:8]))))
+
+    rows = []
+    for a in d["answers"]:
+        rows.append({
+            "question": a.get("key"),
+            "answer": (a.get("answer") or "").replace("\n", " "),
+            "citations": ", ".join(f"{c['report_id']} p.{c['page']}"
+                                   for c in (a.get("citations") or [])) or "—",
+            "quotes_unverified": a.get("quotes_unverified", 0),
+        })
+
+    notes = ["Every claim above is generated from the retrieved report text under "
+             "a cite-or-say-not-found contract, and every citation is checked "
+             "against the chunks actually retrieved — an invented report id or "
+             "page is stripped before it reaches this page."]
+    qbad = sum(a.get("quotes_unverified", 0) for a in d["answers"])
+    qok = sum(a.get("quotes_verified", 0) for a in d["answers"])
+    if qbad:
+        notes.append(
+            f"{qok} quoted figures were found verbatim on the page cited; "
+            f"**{qbad} were not** and are flagged in the table. Those are "
+            f"typically read off badly-OCR'd map or table pages. Check them "
+            f"against the PDF before repeating them to anyone.")
+    else:
+        notes.append(f"All {qok} quoted figures were found verbatim on the page cited.")
+    notes.append("Model: " + str(d.get("model")) + ". Answers are stored, not "
+                 "regenerated, so this section is reproducible.")
+
+    return Section(key="history", title="History (reports)", facts=facts,
+                   tables={"due_diligence": rows}, notes=notes)
+
+
 def _unavailable(key, title, reason):
     return Section(key=key, title=title, available=False,
                    unavailable_reason=reason)
@@ -497,10 +571,7 @@ def assemble(cell_id: str, juris: str = "ON", profile: str = "internal"):
         _buyers_section(cell_id, juris),
         _geology_section(cell_id, juris),
         _drilling_section(cell_id),
-        _unavailable("history", "History (reports)",
-                     "C5.1 report RAG not built; pdfs/ corpus is empty, so no "
-                     "work-history, best-historical-result or reason-work-stopped "
-                     "summary can be cited"),
+        _history_section(cell_id, juris),
         _unavailable("economics", "Economics",
                      "C6.2 buyer profiles are built (see Buyers), but pricing is "
                      "not: no comps database (6.1), no valuation model (6.4), and "

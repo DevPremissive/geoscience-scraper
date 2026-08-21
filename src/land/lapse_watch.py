@@ -37,6 +37,7 @@ import config as C
 from land import rules as R
 
 OUT_PATH = C.PROCESSED_DIR / "lapse_watch.parquet"
+REOPENED_PATH = C.PROCESSED_DIR / "reopened_confirmed.parquet"
 
 #: Which attribute carries the expiry date, per jurisdiction. Where a registry
 #: publishes none, the fallback is observed `expired` events from tenure_events.
@@ -203,6 +204,120 @@ def reopening_delay_days(juris: str):
     return None
 
 
+def confirm_reopened(juris: str = "ON", write: bool = True,
+                     as_of: str | None = None):
+    """Ground from expired claims that has provably reopened (C1.6, final step).
+
+    PLAN_C1 1.6: "lapse != instantly open in every jurisdiction (grace periods,
+    pending-forfeiture states ...); the alert pipeline must re-check
+    `land_state` after the rules-defined reopening delay before flagging ground
+    as stakeable."
+
+    Three conditions, all required, and the third is the one that does the work:
+
+      1. the claim's due date is at least `reopening_delay_days` in the past —
+         3 for Ontario, measured from the due date (`CLAIM_DUE_`), sourced from
+         the MNDM relief-from-forfeiture policy;
+      2. the claim is GONE from the current operational register, which is the
+         register's own statement that it forfeited rather than our inference
+         from a date;
+      3. `land_state` now calls the ground **open**.
+
+    Condition 2 matters because Ontario's active register holds thousands of
+    claims past their due date and still held — extensions, exclusions of time,
+    and relief from forfeiture all keep a claim alive past a date that looks
+    terminal. Reading the date alone would point a buyer at owned ground, which
+    is the specific error this function exists to avoid.
+
+    Even all three together is NOT clean title: the Recorder can relieve a
+    forfeiture caused by Crown administrative error after someone else has
+    registered, and impose terms or refer the matter to the Tribunal (Mining Act
+    s.49(1)). Every row carries that caveat.
+    """
+    import geopandas as gpd
+    import pandas as pd
+
+    delay = reopening_delay_days(juris)
+    if delay is None:
+        stakeable_after(juris)
+        return None
+
+    spec = EXPIRY_FIELD.get(juris)
+    if not spec:
+        sys.exit(f"no published expiry field registered for {juris}")
+    layer, field = spec
+    today = pd.Timestamp(as_of or dt.date.today())
+    cutoff = today - pd.Timedelta(days=delay)
+
+    # The register as it stands now. A claim still in here has not forfeited,
+    # whatever its due date says.
+    live = gpd.read_file(C.GPKG_PATH, layer=layer,
+                         columns=["TENURE_NUM", field])
+    live[field] = pd.to_datetime(live[field], errors="coerce")
+    live_ids = set(live["TENURE_NUM"].astype(str))
+    past_due_but_held = int((live[field] < today).sum())
+
+    # Claims we last saw expiring, from the watch list.
+    if not OUT_PATH.exists():
+        print(f"  no lapse-watch scan on disk — run --scan first")
+        return None
+    watch = pd.read_parquet(OUT_PATH)
+    watch = watch[watch["juris"] == juris].copy()
+    watch["expiry_date"] = pd.to_datetime(watch["expiry_date"], errors="coerce")
+
+    eligible = watch[watch["expiry_date"] <= cutoff].copy()
+    gone = eligible[~eligible["claim_id"].astype(str).isin(live_ids)].copy()
+
+    print(f"  {juris}: reopening delay {delay}d from the due date")
+    print(f"  {len(watch):,} watched · {len(eligible):,} past due+delay · "
+          f"{len(gone):,} also gone from the register")
+    print(f"  ({past_due_but_held:,} claims in the register are past due and "
+          f"STILL HELD — extensions, exclusions, or relief)")
+    if gone.empty:
+        print("  nothing confirmed reopened")
+        return pd.DataFrame()
+
+    # Third condition: land_state must actually call it open.
+    states = _land_state_for(gone["cell_r9"].tolist(), juris)
+    gone["land_state"] = gone["cell_r9"].map(states)
+    confirmed = gone[gone["land_state"] == "open"].copy()
+    unknown = gone[gone["land_state"].isna()]
+    blocked = gone[gone["land_state"].notna() & (gone["land_state"] != "open")]
+
+    print(f"  land_state: {len(confirmed):,} open · {len(blocked):,} still "
+          f"blocked · {len(unknown):,} outside any computed AOI")
+    if confirmed.empty:
+        return pd.DataFrame()
+
+    confirmed["status"] = "reopened_confirmed"
+    confirmed["confirmed_at"] = dt.datetime.now().isoformat(timespec="seconds")
+    confirmed["reopening_delay_days"] = delay
+    confirmed["title_caveat"] = (
+        "Not clean title. A forfeiture caused by Crown administrative error can "
+        "be relieved by the Recorder after a new registration, with terms or a "
+        "Tribunal referral (Mining Act s.49(1)).")
+    if write:
+        confirmed.to_parquet(REOPENED_PATH, index=False, compression="zstd")
+        print(f"  → {REOPENED_PATH}")
+    return confirmed
+
+
+def _land_state_for(cells_r9, juris: str = "ON") -> dict:
+    """`{cell_r9: state}` from whichever computed AOI covers each cell."""
+    import pandas as pd
+    out: dict = {}
+    want = set(cells_r9)
+    d = C.PROCESSED_DIR / "land_state"
+    if not d.exists():
+        return out
+    for p in sorted(d.glob(f"{juris}__*.parquet")):
+        df = pd.read_parquet(p, columns=["cell_id", "state"])
+        hit = df[df["cell_id"].isin(want)]
+        for r in hit.itertuples(index=False):
+            out.setdefault(r.cell_id, r.state)
+    return out
+
+
 def stakeable_after(juris: str = "ON"):
     """Expired claims whose ground has provably reopened. Refuses when unknown."""
     delay = reopening_delay_days(juris)
@@ -221,8 +336,8 @@ def stakeable_after(juris: str = "ON"):
         print(f"  To enable: fill `expiry_mechanics.reopening_delay_days` in")
         print(f"  rules/{juris.upper()}.yaml and sign the file.")
         return None
-    print(f"  reopening delay for {juris}: {delay} days — not yet implemented "
-          f"beyond this gate")
+    print(f"  reopening delay for {juris}: {delay} days "
+          f"(from the due date) — see confirm_reopened() for the ground itself")
     return delay
 
 
@@ -247,7 +362,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--scan", metavar="JURIS")
     ap.add_argument("--days", type=int)
-    ap.add_argument("--stakeable", metavar="JURIS")
+    ap.add_argument("--stakeable", metavar="JURIS",
+                    help="report the reopening delay gate")
+    ap.add_argument("--confirm-reopened", metavar="JURIS",
+                    help="ground from expired claims that has provably reopened")
+    ap.add_argument("--as-of", help="evaluate the delay as of this date")
     ap.add_argument("--notify", action="store_true")
     args = ap.parse_args()
     C.require_lake()
@@ -258,7 +377,15 @@ def main():
             print(f"  {n} alert(s) handed to C3.6")
     if args.stakeable:
         stakeable_after(args.stakeable)
-    if not (args.scan or args.stakeable):
+    if args.confirm_reopened:
+        df = confirm_reopened(args.confirm_reopened, as_of=args.as_of)
+        if df is not None and not df.empty:
+            print(f"\n  {len(df)} parcel(s) confirmed reopened:")
+            for r in df.head(10).itertuples(index=False):
+                print(f"    {r.claim_id:10s} due {str(r.expiry_date)[:10]}  "
+                      f"{r.owner[:38]}")
+            print(f"\n  {df['title_caveat'].iloc[0]}")
+    if not (args.scan or args.stakeable or args.confirm_reopened):
         ap.print_help()
 
 

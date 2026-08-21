@@ -605,6 +605,77 @@ def _history_section(cell_id: str, juris: str):
                    tables={"due_diligence": rows}, notes=notes)
 
 
+def _economics_section(cell_id: str, juris: str):
+    """Dossier section 8 — what C6.5 can say, and what still cannot be said.
+
+    Ontario's signature on 2026-08-21 turned on the holding schedule. It did not
+    turn on a price: comps (6.1) and valuation (6.4) both need deal terms from
+    filing PDFs this repo does not hold. So the section is AVAILABLE with the
+    cost of carrying the ground and explicitly silent on what it is worth —
+    which is the honest shape, and better than a NOT AVAILABLE block that hides
+    a real number behind a missing one."""
+    try:
+        from market import holding as H
+    except Exception as e:                                      # noqa: BLE001
+        return _unavailable("economics", "Economics",
+                            f"C6.5 holding module unavailable: {e}")
+    try:
+        view = H.for_cell(cell_id, juris)
+    except Exception as e:                                      # noqa: BLE001
+        return _unavailable("economics", "Economics",
+                            f"holding cost could not be computed: "
+                            f"{type(e).__name__}: {e}")
+    if view.get("error"):
+        return _unavailable("economics", "Economics", view["error"])
+
+    h, c, carry = view["holding"], view["credits"], view["carry"]
+    src = "market/holding.py + rules/ON.yaml"
+    snap = h["rules_signed_date"]
+    facts = [
+        Fact(label="Nearest block", value=f"{h['block_id']} ({h['owner']})",
+             provenance=_prov("ownership.duckdb", snap)),
+        Fact(label="Block size", value=h["n_claims"], unit="claims",
+             provenance=_prov("ownership.duckdb", snap)),
+        Fact(label=f"{h['years']}-year holding cost", value=h["grand_total"],
+             unit=h["currency"], provenance=_prov(src, snap),
+             note=f"Fee schedule signed by {h['rules_signed_by']}. Cost to HOLD "
+                  f"the block — not an acquisition price, and not a work budget."),
+        Fact(label="Annual obligation", value=c["annual_obligation"],
+             unit=h["currency"], provenance=_prov(src, snap)),
+    ]
+    if c.get("historical_work_value"):
+        yrs = c.get("historical_work_years") or []
+        facts.append(Fact(
+            label="Historical work approved on this ground",
+            value=round(c["historical_work_value"]), unit=h["currency"],
+            provenance=_prov("ON_OMEIS_TECHFILE", snap),
+            note=f"{c['historical_work_reports']} assessment reports"
+                 + (f", {yrs[0]}–{yrs[1]}" if len(yrs) == 2 else "")
+                 + ". Evidence of spend, NOT runway a buyer inherits."))
+
+    rows = [{"horizon_years": y, "cost_to_carry": v["total"],
+             "per_claim": v["per_claim"], "currency": v["currency"]}
+            for y, v in carry["horizons"].items()]
+
+    notes = [
+        "Carry cost is the denominator of the deal decision and the input to "
+        "walk-away timing (PLAN_C6 6.5). " + carry["note"],
+        "BANKED CREDITS ARE NOT VISIBLE. " + c["missing_because"]["banked_credits"]
+        + " So the runway a buyer inherits cannot be quoted, only the work "
+          "history that suggests it exists.",
+        "NO PRICE HERE. Comps (C6.1) and valuation (C6.4) need deal terms "
+        "extracted from filing PDFs this repo does not hold, so nothing above "
+        "is an estimate of what the ground is worth — only of what it costs to "
+        "keep. Deal score (C6.6) follows valuation and is likewise absent.",
+    ]
+    if c.get("transferable_with_claim") is not None:
+        notes.append(
+            f"Credits assumed transferable with the claim "
+            f"({c['transferable_with_claim']}). {c['transferable_basis']}")
+    return Section(key="economics", title="Economics", facts=facts,
+                   tables={"carry_cost": rows}, notes=notes)
+
+
 def _unavailable(key, title, reason):
     return Section(key=key, title=title, available=False,
                    unavailable_reason=reason)
@@ -625,11 +696,7 @@ def assemble(cell_id: str, juris: str = "ON", profile: str = "internal"):
         _geology_section(cell_id, juris),
         _drilling_section(cell_id),
         _history_section(cell_id, juris),
-        _unavailable("economics", "Economics",
-                     "C6.2 buyer profiles are built (see Buyers), but pricing is "
-                     "not: no comps database (6.1), no valuation model (6.4), and "
-                     "rules/ON.yaml is unsigned so even the holding schedule "
-                     "cannot be quoted"),
+        _economics_section(cell_id, juris),
         _unavailable("recommendation", "Recommendation & signoff",
                      "a named buyer now exists (C6.2) but a price range does "
                      "not; with no comps and no valuation, any recommendation "

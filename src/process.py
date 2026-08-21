@@ -315,6 +315,11 @@ def _layer_has_geometry(path, layer) -> bool:
         return True          # unreadable metadata: let the normal path try
 
 
+#: Target cells (rows x columns) per Arrow batch. ~4M cells is tens of MB for
+#: the mixed string/float schemas these tables carry.
+TARGET_BATCH_CELLS = 4_000_000
+
+
 def _table_to_parquet(path, layer, out: Path) -> int:
     """Stream a geometry-less container layer to Parquet in record batches.
 
@@ -326,21 +331,44 @@ def _table_to_parquet(path, layer, out: Path) -> int:
     """
     import pyogrio, pyarrow.parquet as pq
     kw = {"layer": layer} if layer else {}
+
+    # Batch by CELLS, not rows. The default 65,536-row batch is fine at 16
+    # columns and 0.87 GB at 1,630 — and Québec ships both from the same file:
+    # `R1E03_RESULTAT_ANALYSE_ES` is 21,237,346 x 16, while
+    # `R1E01_ECHANTILLON_ROCHE_RESULTAT` is 582,192 x 1,629. A fixed row count
+    # makes peak memory a function of the publisher's schema width, which is
+    # how this source OOM-killed the whole pass (audit O2).
+    ncols = 0
     try:
-        with pyogrio.raw.open_arrow(str(path), use_pyarrow=True, **kw) as (_meta, reader):
+        ncols = len(pyogrio.read_info(str(path), **kw).get("fields") or [])
+    except Exception:                                           # noqa: BLE001
+        pass
+    batch_size = 65536
+    if ncols > 64:
+        batch_size = max(1024, min(65536, TARGET_BATCH_CELLS // ncols))
+
+    try:
+        with pyogrio.raw.open_arrow(str(path), use_pyarrow=True,
+                                    batch_size=batch_size, **kw) as (_meta, reader):
             writer = None
             n = 0
             try:
                 for batch in reader:
                     if writer is None:
-                        writer = pq.ParquetWriter(out, batch.schema)
+                        writer = pq.ParquetWriter(out, batch.schema, compression="zstd")
                     writer.write_batch(batch)
                     n += batch.num_rows
             finally:
                 if writer is not None:
                     writer.close()
         return n
-    except Exception:                                           # noqa: BLE001
+    except Exception as e:                                      # noqa: BLE001
+        # The fallback materialises the WHOLE layer. On a 948-million-cell table
+        # that is 19 GB, so it must be loud: a silent fallback here is
+        # indistinguishable from the streaming path right up until the kill.
+        print(f"   ! {out.stem}: arrow streaming failed ({type(e).__name__}: "
+              f"{str(e)[:90]}) — falling back to a whole-layer read of "
+              f"{ncols} columns", file=sys.stderr)
         df = pyogrio.read_dataframe(str(path), read_geometry=False, **kw)
         df.to_parquet(out, index=False)
         return len(df)
@@ -370,6 +398,78 @@ def same_layer(a, b) -> bool:
                  .geom_equals(b.geometry.reset_index(drop=True)).all())
 
 
+
+def _schema_fields(path, sub) -> tuple:
+    """Column names of a layer WITHOUT reading its rows.
+
+    `pyogrio.read_info` reads the header only, so a whole source's schema map
+    costs no memory. That is what lets `process_one` know how many layer groups
+    it will produce before it has loaded any of them — and therefore stream each
+    one to disk instead of holding all of them (audit O1)."""
+    import pyogrio
+    try:
+        info = (pyogrio.read_info(str(path), layer=sub) if sub
+                else pyogrio.read_info(str(path)))
+    except Exception as e:                                      # noqa: BLE001
+        # Loud: an unreadable header means the caller under-counts schemas and
+        # names layers wrongly. Silence here cost a layer its name once already.
+        print(f"   ! schema probe failed for {Path(path).name}[{sub or '-'}]: "
+              f"{type(e).__name__}: {str(e)[:80]}", file=sys.stderr)
+        return ()
+    # `info["fields"]` is a numpy array. `arr or []` raises "truth value of an
+    # array ... is ambiguous", which a bare except turned into "this layer has
+    # no fields" — every schema came back empty, the distinct-schema count
+    # collapsed to 1, and the first layer written took the unsuffixed name that
+    # belongs to a single-schema source.
+    fields = info.get("fields")
+    fields = [] if fields is None else list(fields)
+    return tuple(sorted(str(f) for f in fields
+                        if str(f).upper() not in ("OBJECTID", "FID")))
+
+
+def layer_fingerprint(g) -> str:
+    """Exact-content digest of a frame, standing in for holding the frame.
+
+    `same_layer()` compares every attribute and every geometry between two
+    candidate duplicates. Doing that required keeping every loaded frame in
+    memory, which is the OOM. A digest over the same data answers the same
+    question at constant cost.
+
+    One deliberate narrowing: `same_layer` used `geom_equals`, which is
+    topological, and this hashes WKB after `normalize()`, which is geometric.
+    Two frames that describe the same shapes with different vertex counts would
+    have compared equal and will now compare different. The case this dedupe
+    exists for is a publisher shipping one export twice (Nova Scotia's mineral
+    rights, in the geodatabase and again as a shapefile), where the coordinates
+    are identical — and the failure mode of the narrowing is a duplicate kept,
+    which shows up as a doubled row count rather than as lost data.
+    """
+    import hashlib
+    import pandas as pd
+    from shapely import normalize
+
+    cols = sorted(c for c in g.columns if c != "geometry")
+    h = hashlib.blake2b(digest_size=16)
+    h.update("|".join(cols).encode("utf-8", "replace"))
+    if cols:
+        vals = pd.util.hash_pandas_object(
+            g[cols].reset_index(drop=True), index=False).to_numpy()
+        h.update(vals.tobytes())
+    # `normalize()` returns an OBJECT array of geometries; calling .tobytes() on
+    # that hashes the pointers, so two identical frames digest differently and
+    # the dedupe silently stops working. Serialise to WKB explicitly.
+    gh = hashlib.blake2b(digest_size=16)
+    try:
+        from shapely import to_wkb
+        for w in to_wkb(normalize(g.geometry.to_numpy()), include_srid=False):
+            gh.update(w or b"")
+    except Exception:                                           # noqa: BLE001
+        for w in g.geometry.to_wkb():
+            gh.update(w or b"")
+    h.update(gh.digest())
+    return h.hexdigest()
+
+
 def process_one(juris, code, effective_date, files):
     print(f"\n[{juris}/{code}] {effective_date}  ({len(files)} files)")
     with tempfile.TemporaryDirectory() as td:
@@ -381,8 +481,8 @@ def process_one(juris, code, effective_date, files):
         # same download also contains a real .gpkg.
         PRIORITY = [".geojson", ".json", ".gpkg", ".gdb", ".fgdb", ".shp",
                     COVERAGE, ".kml", ".kmz", ".gpx"]
-        # (frame, source_stem) for everything readable at the winning priority.
-        loaded: list = []
+        base = f"{juris}__{code}".replace(" ", "_").replace("-", "_")
+
         for ext in PRIORITY:
             if ext is COVERAGE:
                 candidates = sorted({p.parent for p in work.rglob("*.adf")})
@@ -391,69 +491,99 @@ def process_one(juris, code, effective_date, files):
                               if p.name != "_source.json"]
             if not candidates:
                 continue
-            # Exact-duplicate frames seen so far, bucketed by a cheap key so the
-            # expensive comparison only runs against genuine candidates. Without
-            # the bucket this is quadratic over 1,541 OGSEarth tiles.
-            seen: dict = {}
+
+            # --- pass 1: schemas only, no rows read ------------------------
+            # Which layers share a schema decides whether they merge into one
+            # layer and therefore what each is called, and that has to be known
+            # BEFORE anything is written. read_info reads the header only, so
+            # this costs no memory even for Québec's 28-layer sigeom.gpkg.
+            plan: list = []
             for f in candidates:
-                # Containers hold many layers — gpd.read_file() would silently
-                # return only the first. QC's sigeom.gpkg carries 28.
                 for sub in _sublayers(f):
-                    try:
-                        # Flat tables inside a spatial container go to the
-                        # tabular store, not into geo.gpkg (Master §4).
-                        if not _layer_has_geometry(f, sub):
-                            out = (C.TABLES_DIR /
-                                   f"{lname_clean(f'{juris}__{code}__{sub or f.stem}')}.parquet")
-                            n = _table_to_parquet(f, sub, out)
-                            print(f"   table {out.stem:<48}{n:>9}")
-                            continue
-                        g = gpd.read_file(f, layer=sub) if sub else gpd.read_file(f)
-                        if g.empty:
-                            continue
-                        key = (len(g), tuple(sorted(c for c in g.columns
-                                                    if c != "geometry")))
-                        if any(same_layer(g, prev) for prev in seen.get(key, ())):
-                            print(f"   = dup {f.name}[{sub or '-'}] — identical to "
-                                  f"an already-loaded layer, skipped")
-                            continue
-                        seen.setdefault(key, []).append(g)
-                        # Coverage sublayers are topology primitives — every
-                        # coverage has an ARC and a PAL — so the sublayer name
-                        # alone collides across coverages in one download.
-                        stem = (f"{f.name}_{sub}" if sub and is_coverage(f)
-                                else (sub or f.stem))
-                        if g.crs is None:
-                            g.set_crs(epsg=4326, inplace=True, allow_override=True)
-                        else:
-                            g = g.to_crs(epsg=4326)
-                        drop_cols = [c for c in g.columns if c.upper() in ("OBJECTID", "FID")]
-                        if drop_cols:
-                            g = g.drop(columns=drop_cols)
-                        loaded.append((g, stem))
-                    except Exception as e:                      # noqa: BLE001
-                        print(f"   ! vec {f.name}[{sub or '-'}]: {e}", file=sys.stderr)
-            if loaded:
+                    plan.append((f, sub))
+            vector_plan = [(f, sub) for f, sub in plan if _layer_has_geometry(f, sub)]
+            schemas = {}
+            for f, sub in vector_plan:
+                schemas[(f, sub)] = _schema_fields(f, sub)
+            n_groups = len({v for v in schemas.values() if v})
+
+            # --- pass 2: stream each layer to disk, then release it --------
+            #
+            # This used to accumulate every frame in `loaded` and group at the
+            # end, which is the QC geochem OOM: one source can carry 28 layers
+            # of hundreds of thousands of rows and 124 columns, and they were
+            # all resident at once. Now each frame is written (or appended to
+            # its group's layer) and dropped. Duplicate detection keeps a
+            # fingerprint instead of the frame (audit O1).
+            group_layer: dict = {}      # schema key -> layer name
+            group_rows: dict = {}       # schema key -> rows written
+            seen_fp: dict = {}          # bucket key -> {fingerprint}
+            wrote_vector = 0
+
+            for f, sub in plan:
+                try:
+                    if not _layer_has_geometry(f, sub):
+                        out = (C.TABLES_DIR /
+                               f"{lname_clean(f'{juris}__{code}__{sub or f.stem}')}.parquet")
+                        n = _table_to_parquet(f, sub, out)
+                        print(f"   table {out.stem:<48}{n:>9}")
+                        continue
+                    g = gpd.read_file(f, layer=sub) if sub else gpd.read_file(f)
+                    if g.empty:
+                        continue
+                    if g.crs is None:
+                        g.set_crs(epsg=4326, inplace=True, allow_override=True)
+                    else:
+                        g = g.to_crs(epsg=4326)
+                    drop_cols = [c for c in g.columns if c.upper() in ("OBJECTID", "FID")]
+                    if drop_cols:
+                        g = g.drop(columns=drop_cols)
+
+                    key = (len(g), tuple(sorted(c for c in g.columns if c != "geometry")))
+                    fp = layer_fingerprint(g)
+                    if fp in seen_fp.setdefault(key, set()):
+                        print(f"   = dup {f.name}[{sub or '-'}] — identical to "
+                              f"an already-written layer, skipped")
+                        del g
+                        continue
+                    seen_fp[key].add(fp)
+
+                    schema = tuple(sorted(c for c in g.columns if c != "geometry"))
+                    stem = (f"{f.name}_{sub}" if sub and is_coverage(f)
+                            else (sub or f.stem))
+                    if schema not in group_layer:
+                        name = lname_clean(base if n_groups <= 1
+                                           else f"{base}__{stem}")
+                        # Belt and braces. `n_groups` comes from a metadata pass,
+                        # and a layer whose header could not be read contributes
+                        # an empty schema and is not counted — so a source can
+                        # turn out to hold more distinct schemas than the plan
+                        # predicted. Without this guard the second schema would
+                        # reuse the first's layer name and open it with mode="w",
+                        # silently replacing a layer that had just been written.
+                        if name in set(group_layer.values()):
+                            name = lname_clean(f"{base}__{stem}")
+                            n = 2
+                            while name in set(group_layer.values()):
+                                name = lname_clean(f"{base}__{stem}_{n}")
+                                n += 1
+                        group_layer[schema] = name
+                        group_rows[schema] = 0
+                        mode = "w"
+                    else:
+                        mode = "a"
+                    layer_name = group_layer[schema]
+                    g.to_file(C.GPKG_PATH, layer=layer_name, driver="GPKG", mode=mode)
+                    group_rows[schema] += len(g)
+                    wrote_vector += 1
+                    del g
+                except Exception as e:                          # noqa: BLE001
+                    print(f"   ! vec {f.name}[{sub or '-'}]: {e}", file=sys.stderr)
+
+            for schema, layer_name in group_layer.items():
+                print(f"   layer {layer_name:<48}{group_rows[schema]:>9}")
+            if wrote_vector:
                 break
-
-        # Group by schema. Tiled sources (1,541 OGSEarth KMZ tiles) share one
-        # schema and must merge into a single layer; multi-dataset bundles (the
-        # MLAS ZIP holds cell claims, cancelled claims, alienations, tenure,
-        # plans & permits) have different schemas and must not be concatenated
-        # into a sparse union of everything.
-        groups: dict = {}
-        for g, stem in loaded:
-            key = tuple(sorted(c for c in g.columns if c != "geometry"))
-            groups.setdefault(key, []).append((g, stem))
-
-        base = f"{juris}__{code}".replace(" ", "_").replace("-", "_")
-        for frames in groups.values():
-            merged = (gpd.pd.concat([f for f, _ in frames], ignore_index=True)
-                      if len(frames) > 1 else frames[0][0])
-            name = base if len(groups) == 1 else f"{base}__{frames[0][1]}"
-            layer_name = lname_clean(name)
-            merged.to_file(C.GPKG_PATH, layer=layer_name, driver="GPKG")
-            print(f"   layer {layer_name:<48}{len(merged):>9}")
 
         # Access databases: every table to Parquet, plus a point layer wherever
         # a table carries UTM coordinates instead of geometry.

@@ -323,6 +323,75 @@ def run_batch(max_reports: int = 14, min_holes: int = 5, radius_km: float = 0.0,
     return batch
 
 
+def _page_no(v) -> str:
+    try:
+        return str(int(float(v)))
+    except (TypeError, ValueError):
+        return "?"
+
+
+def _page_of(pdf: Path) -> str:
+    try:
+        import fitz
+        d = fitz.open(str(pdf))
+        n = len(d)
+        d.close()
+        return f" of {n}"
+    except Exception:                                           # noqa: BLE001
+        return ""
+
+
+def manifest(write_csv: str | None = None):
+    """Every reviewable row with the exact document and page to check it against.
+
+    A verdict a reviewer cannot trace to a page is a verdict they cannot audit,
+    so this is printed as a standing table rather than only inside the
+    interactive flow — and it doubles as the check that every citation actually
+    resolves, which is worth knowing BEFORE sitting down to review."""
+    import pandas as pd
+    import reports as R
+
+    frames = [pd.read_parquet(p) for p in (TIER2, NONBARREN) if p.exists()]
+    if not frames:
+        print("  no batch on disk — run `--run` first")
+        return None
+    df = pd.concat(frames, ignore_index=True)
+    pdf_dir = R.pdf_dir("ON", "ON_AFRI_PDF")
+
+    rows, missing = [], 0
+    for r in df.itertuples(index=False):
+        pdf = pdf_dir / f"{r.report_id}.pdf"
+        pg = _page_no(r.page)
+        ok = pdf.exists() and pg != "?"
+        if not ok:
+            missing += 1
+        rows.append({
+            "report_id": r.report_id,
+            "hole": r.company_hole_id or r.hole_id,
+            "verdict": r.verdict,
+            "confidence": r.confidence,
+            "quote_verified": r.quote_verified,
+            "page": pg,
+            "source_pdf": str(pdf),
+            "resolves": ok,
+        })
+
+    print(f"\n  {len(rows)} reviewable rows. Check each verdict "
+          f"against the page named here.\n")
+    print(f"  {'report':14s} {'hole':10s} {'verdict':12s} {'conf':7s} "
+          f"{'qv':5s} page")
+    for x in rows:
+        print(f"  {x['report_id']:14s} {str(x['hole']):10s} {x['verdict']:12s} "
+              f"{str(x['confidence']):7s} {str(x['quote_verified']):5s} "
+              f"{x['page']:>5s}" + ("" if x["resolves"] else "   <-- UNRESOLVED"))
+    print(f"\n  all rows live under: {pdf_dir}")
+    print(f"  {len(rows)-missing}/{len(rows)} resolve to a real file and page")
+    if write_csv:
+        pd.DataFrame(rows).to_csv(write_csv, index=False)
+        print(f"  → {write_csv}")
+    return rows
+
+
 def review(sample_pct: int = 10, seed: int = 0, sample_n: int | None = None) -> None:
     """The binding human QA gate. Interactive by design."""
     import pandas as pd
@@ -366,8 +435,10 @@ def review(sample_pct: int = 10, seed: int = 0, sample_n: int | None = None) -> 
                   "the figures against the page.")
         # The whole point of the gate is comparing against the source, so make
         # opening the source a copy-paste rather than a hunt.
-        print(f"    CHECK IT  : {pdf}  page {r['page']}")
-        print(f"                xdg-open '{pdf}'   # then go to page {r['page']}")
+        pg = _page_no(r["page"])
+        print(f"    SOURCE    : {pdf}")
+        print(f"                page {pg}{_page_of(pdf)}")
+        print(f"                xdg-open '{pdf}'")
         ans = input("    verdict correct? [y/n/s=skip] ").strip().lower()
         if ans == "y":
             correct += 1
@@ -407,6 +478,9 @@ def main():
     ap.add_argument("--sample-n", type=int, default=None,
                     help="review a fixed count instead of 10%%")
     ap.add_argument("--status", action="store_true")
+    ap.add_argument("--manifest", action="store_true",
+                    help="every reviewable row with its source document and page")
+    ap.add_argument("--csv", help="write the manifest to a CSV")
     ap.add_argument("--max-reports", type=int, default=14)
     ap.add_argument("--min-holes", type=int, default=5)
     ap.add_argument("--limit-holes", type=int, default=None,
@@ -424,6 +498,9 @@ def main():
         return
     if args.review:
         review(sample_n=args.sample_n)
+        return
+    if args.manifest:
+        manifest(args.csv)
         return
     if args.status:
         status()

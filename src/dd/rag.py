@@ -340,7 +340,22 @@ def ask(tid: str, question: str, retrieval: str | None = None,
     }
 
 
-def run_all(cell_id: str, juris: str = "ON", k: int = 12,
+def auto_k(chunks: int) -> int:
+    """Retrieval width scaled to corpus size.
+
+    A fixed k silently degrades as the corpus grows. When filename resolution
+    took this target from 7 reports to 12 — 581 chunks to 2,141 — the SAME k=12
+    dropped the run from 5/6 answered with 21 citations to 4/6 with 15, and
+    quote verification from 17/20 to 7/11: the top twelve now spread across
+    twelve reports instead of seven, and the relevant pages were crowded out by
+    merely-adjacent ones. At k=24 it recovers to 5/6, 19 citations, 19/20 quotes.
+
+    A bigger corpus is not automatically a better answer. It is a better answer
+    only if you go looking through more of it."""
+    return max(12, min(32, round(chunks / 90)))
+
+
+def run_all(cell_id: str, juris: str = "ON", k: int | None = None,
             quiet: bool = False) -> dict:
     """The full six-question set, stored so a dossier regeneration is pinned."""
     tid = I.target_id(cell_id, juris)
@@ -348,6 +363,10 @@ def run_all(cell_id: str, juris: str = "ON", k: int = 12,
     if man is None:
         sys.exit(f"no ingested corpus for {tid} — run `python -m dd.ingest "
                  f"--cell {cell_id}` first")
+    if k is None:
+        k = auto_k(man.get("chunks_embedded") or 0)
+        if not quiet:
+            print(f"  corpus {man.get('chunks_embedded')} chunks → k={k}")
 
     answers = []
     for q in QUESTIONS:
@@ -401,7 +420,8 @@ def main():
     ap = argparse.ArgumentParser(description="C5.1 — due-diligence question set")
     ap.add_argument("--cell", required=True)
     ap.add_argument("--juris", default="ON")
-    ap.add_argument("-k", type=int, default=12, help="chunks retrieved per question")
+    ap.add_argument("-k", type=int, default=None,
+                    help="chunks retrieved per question (default: scaled to corpus)")
     ap.add_argument("--question", type=int, help="run one question (1-6)")
     ap.add_argument("--ask", help="free-form question against this target")
     ap.add_argument("--show", action="store_true", help="print stored answers")
@@ -421,7 +441,8 @@ def main():
                     f"{c['report_id']} p.{c['page']}" for c in a["citations"]))
         return
     if args.ask:
-        a = ask(tid, args.ask, k=args.k)
+        man = I.stats(args.cell, args.juris) or {}
+        a = ask(tid, args.ask, k=args.k or auto_k(man.get("chunks_embedded") or 0))
         print(a["answer"])
         if a["citations"]:
             print("\ncited: " + ", ".join(
@@ -431,7 +452,10 @@ def main():
         q = next((x for x in QUESTIONS if x["id"] == args.question), None)
         if not q:
             sys.exit("question must be 1-6")
-        a = ask(tid, q["question"], q["retrieval"], k=args.k)
+        man = I.stats(args.cell, args.juris) or {}
+        a = ask(tid, q["question"], q["retrieval"],
+                k=args.k or auto_k(man.get("chunks_embedded") or 0),
+                lexical=q.get("lexical", False))
         print(f"{q['question']}\n\n{a['answer']}")
         return
     run_all(args.cell, args.juris, k=args.k)

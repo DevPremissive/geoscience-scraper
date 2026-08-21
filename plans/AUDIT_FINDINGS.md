@@ -1686,6 +1686,7 @@ it. Nothing in C2.2 touched `mapapi.py`.
 ## P. C3.4 and C5.1/C5.2 build findings (2026-08-21)
 
 ### P1. Ontario AFRI PDFs are the scanned-paper era only — 0/12 for 2010+
+### ...and P1 WAS WRONG. Corrected the same day — see P9.
 
 `connectors/scrape.py` records the blob pattern `{id}/{id}.Pdf` as an "observed
 pattern". It is observed and it does not generalise. Measured over a 60-id
@@ -1812,6 +1813,56 @@ work was a spatial query, a per-target fetch loop and the coverage accounting in
 P1. BC ARIS remains unbuilt and is not needed for Gate G2.
 
 
+### P9. P1 was our bug, not the publisher's — the filename is in the metadata
+
+P1 concluded that modern MLAS-era reports were unreachable and needed "a
+devtools capture of the SPA's own download call". That was wrong, and the
+evidence to disprove it was already in a response this session had printed.
+
+`connectors/scrape.py` hardcodes the blob name as `{id}.Pdf`. The GeologyOntario
+metadata record carries the real one:
+
+    technical_reports: [{"year": 2023, "pages": 139,
+                         "title": "Report on the Summer - Fall 2021 Field Work
+                                   on the Egan Property",
+                         "file_name": "20000021294_01.pdf"}]
+
+Lowercase extension, `_01` suffix, and it downloads an 8.1 MB PDF. The reason
+P1 missed it is worth more than the fix: the diagnostic printed
+`sorted(m)[:14]`, and `technical_reports` sorts twentieth. **A truncated
+diagnostic produced a confident architectural conclusion** — that a scraping
+project was needed — from a key that was there all along.
+
+Re-measured with `resolve_pdf_files()` doing filename resolution before falling
+back to the legacy pattern:
+
+| era | legacy pattern | with resolution |
+|---|---|---|
+| pre-1990 | 10/12 | 10/10 |
+| 1990s | 11/12 | 10/10 |
+| 2000s | 2/12 | 10/10 |
+| 2010+ | **0/12** | **10/10** |
+| overall | 53% | **100%** |
+
+The Phase-1 target went from 7 of 12 reports to 12 of 12, and the corpus from
+303 pages to 1,106. The ~18,000 post-2000 reports P1 called the highest-value
+follow-up in C5 are simply available.
+
+### P10. A bigger corpus made the answers worse until k was scaled with it
+
+Quadrupling the corpus at a fixed `k=12` **degraded** the question set: 5/6
+answered with 21 citations and 17/20 quotes verified became 4/6 with 15 and
+7/11. The top twelve chunks now spread across twelve reports instead of seven,
+so relevant pages were crowded out by merely-adjacent ones. At `k=24` it
+recovers — 5/6, 19 citations, 19/20 quotes verified.
+
+`auto_k()` now scales retrieval width with chunk count. The general lesson is
+that **a retrieval constant tuned against one corpus size is a silent
+regression waiting for the corpus to grow**, and the failure is invisible: the
+answers stay fluent and cited, there is just less in them. Only the
+quote-verification count made it legible.
+
+
 ---
 
 ## Change log
@@ -1824,3 +1875,4 @@ P1. BC ARIS remains unbuilt and is not needed for Gate G2.
 - **2026-08-20 (C2.2 pass)** — section N: for Ontario the CMMI release is the geophysics modality rather than a benchmark, closing that gap without C3.2 (N1); the plan's sediment-thickness layer does not exist and the published surfaces are Zn-Pb against our orogenic-Au model (N2); the CD GeoTIFF ships with no CRS, so `ingest()` now takes an evidenced assertion (N3) after two silent failures left the registry describing a file that did not exist (N4); cross-system rank agreement is reported as a sanity check, not a score, and ρ=−0.50 against MVT is the geologically correct sign (N5); the release's own H3 r7 geology grid validates our fabric at 99.53% once deliberate lake clipping is set aside, while the lithology comparison is inconclusive because the taxonomy crosswalk dominates (N6); `write_features` said append and overwrote, and C2.2 as the second producer erased the 239 geology features until it was fixed (N7); publisher MD5s are now verified (N8).
 - **2026-08-20 (bug-fix pass)** — section O: `process_one` now streams layers instead of holding them (O1) and batches tables by cells rather than rows (O2), but QC_SIGEOM_GEOCHEM still OOMs and the handoff's account of why was wrong — its spatial layers were never at risk, the failure is in two 1,629- and 650-column tables, and the machine only had ~19 GB free (O3); two silent bugs introduced by O1, one of which renamed a layer C1.1 references by name (O4); gap #15 closed now that Saskatchewan is back — SK_SMDI 140 → 6,012 plus 33,490 drillholes (O5); the cell popover went from 2.3 s to 0.4 ms after C2.2 grew the feature store tenfold (O6).
 - **2026-08-21 (C3.4 + C5.1/C5.2 pass)** — section P: Ontario AFRI PDFs cover the pre-2000 scanned era and 0/12 of 2010+, so every retrieval gap is named by id and year (P1); the OCR blocker PLAN_C5 builds around does not exist for Ontario, which ships a text layer on 98% of pages (P2); table extraction fails by every planned route and quote verification proves presence, not correctness (P3); barren is much harder to extract than mineralized — 2 vs 16 over 72 holes — so C5.2's stated purpose yields less than its corollary (P4); a reasoning model reported not-found six times out of six by spending its budget thinking (P5); dense retrieval cannot find a figure, and the lexical pass that fixes it is affordable only because the corpus is per-target (P6); the hole-to-report link is already published on all 172,259 drillholes (P7).
+- **2026-08-21 (correction, same day)** — P9: P1 was our bug. The AFRI filename is published in the metadata record's `technical_reports[].file_name`; a diagnostic truncated at 14 keys hid it and produced a confident wrong conclusion that a scraping project was needed. Retrieval goes 53% → 100% across all eras and the Phase-1 corpus 303 → 1,106 pages. P10: that bigger corpus then made answers WORSE at a fixed k=12 (5/6 → 4/6), so retrieval width now scales with corpus size.

@@ -72,6 +72,35 @@ INDEX_LAYERS = {
     },
 }
 
+def resolve_pdf_files(report_id: str, juris: str = "ON") -> list[str]:
+    """Real file names for a report, from the publisher's own metadata.
+
+    **This is how the modern reports are reached, and it needed no scraping.**
+    `connectors/scrape.py` hardcodes the blob name as `{id}.Pdf`, an "observed
+    pattern" that holds for the pre-2000 scanned era and fails outright for
+    MLAS-era submissions. The GeologyOntario metadata record carries the answer
+    directly in `technical_reports[].file_name` — `20000021294_01.pdf`,
+    lowercase and suffixed — and that path downloads a valid 8 MB PDF.
+
+    A report may carry several files (`_01`, `_02`, …); all are returned. `maps`
+    is a separate array and deliberately not included: map sheets are images and
+    contribute nothing to a text corpus.
+
+    Falls back to the legacy pattern when the metadata is unavailable, so the
+    pre-2000 corpus keeps working if the API is down or unkeyed."""
+    from connectors import scrape as SC
+    try:
+        meta = SC._on_metadata(report_id)
+    except Exception:                                           # noqa: BLE001
+        meta = None
+    names = []
+    for tr in ((meta or {}).get("technical_reports") or []):
+        fn = (tr or {}).get("file_name")
+        if fn:
+            names.append(fn)
+    return names or [f"{report_id}.Pdf"]
+
+
 #: What the `{id}/{id}.Pdf` blob pattern actually covers, measured 2026-08-21
 #: over a 60-id stratified sample of the 62,436 technical-file records:
 #:
@@ -89,10 +118,14 @@ INDEX_LAYERS = {
 #: This is stated rather than smoothed over because a thin corpus that looks
 #: complete is the failure mode: the six-question set in C5.1 would answer
 #: "work stopped in 1998" for ground that was drilled in 2021.
+#: SUPERSEDED 2026-08-21, same day: the gap above was ours, not the publisher's.
+#: `resolve_pdf_files()` reads the real name out of the metadata record and the
+#: modern reports download fine. Kept as the record of what the legacy pattern
+#: alone covers, because the fallback still uses it.
 ERA_COVERAGE_NOTE = (
-    "Ontario AFRI PDFs resolve for the pre-2000 scanned-paper era (~85-90% of "
-    "sampled ids) and effectively not at all for 2010+ (0/12 sampled). Missing "
-    "reports are listed by id and year so the gap is visible, not inferred.")
+    "Reports that still fail after filename resolution are genuinely absent "
+    "from the blob store, not a pattern mismatch. Missing reports are listed by "
+    "id and year so the gap is visible, not inferred.")
 
 #: A PDF smaller than this is not a report. Ontario serves an HTML error body
 #: with a 200 for some ids, and `harvest.py` learned the same lesson the hard
@@ -340,16 +373,30 @@ def fetch_reports(geometry_wkt: str, juris: str = "ON",
                 n_cached += 1
                 continue
 
-            url = sc.pdf_url(rid)
-            try:
-                sha, size = _download(url, dest)
-            except Exception as e:                              # noqa: BLE001
+            # Ask the publisher what the file is called before guessing.
+            names = resolve_pdf_files(rid, juris)
+            base = sc.pdf_url(rid).rsplit("/", 1)[0]
+            sha = size = None
+            url = None
+            last_err = None
+            for fn in names:
+                cand = f"{base}/{fn}"
+                try:
+                    sha, size = _download(cand, dest)
+                    url = cand
+                    break
+                except Exception as e:                          # noqa: BLE001
+                    last_err = f"{type(e).__name__}: {e}"
+            if url is None:
                 rep["status"] = "failed"
-                rep["error"] = f"{type(e).__name__}: {e}"
+                rep["error"] = last_err or "no candidate file name resolved"
+                rep["tried"] = names
                 n_failed += 1
                 if not quiet:
-                    print(f"    ! {rid}: {rep['error']}", file=sys.stderr)
+                    print(f"    ! {rid}: {rep['error']} (tried {names})",
+                          file=sys.stderr)
                 continue
+            rep["pdf_files"] = names
 
             (dest_dir / f"{rid}.json").write_text(json.dumps({
                 "jurisdiction": juris, "connector": "scrape",

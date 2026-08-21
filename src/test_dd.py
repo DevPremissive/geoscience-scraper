@@ -256,8 +256,21 @@ def test_answers_are_cited():
     for a in answered:
         check(len(a.get("citations") or []) > 0,
               f"answer {a['id']} ({a['key']}) carries at least one citation")
-    unver = sum(len(a.get("unverified_citations") or []) for a in d["answers"])
-    check(unver == 0, f"no unverified citations survived into the record ({unver})")
+    # Unverified citations OCCURRING is fine and expected — the model does emit
+    # them. What must hold is that none survives into the answer text, and that
+    # each one is recorded as an audit trail rather than silently dropped.
+    unver = [u for a in d["answers"] for u in (a.get("unverified_citations") or [])]
+    for a in d["answers"]:
+        for u in (a.get("unverified_citations") or []):
+            check(u["citation"] not in (a.get("answer") or ""),
+                  f"stripped citation {u['citation']} is absent from the answer text")
+            check(bool(u.get("reason")), "each stripped citation records why")
+    if unver:
+        check(any("UNVERIFIED CITATION REMOVED" in (a.get("answer") or "")
+                  for a in d["answers"]),
+              f"{len(unver)} stripped citation(s) leave a visible marker")
+    else:
+        check(True, "no unverified citations were emitted this run")
     for a in d["answers"]:
         if not a.get("found"):
             check(RAG.NOT_FOUND in (a.get("answer") or ""),

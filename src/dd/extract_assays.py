@@ -366,6 +366,7 @@ def manifest(write_csv: str | None = None):
         if not ok:
             missing += 1
         rows.append({
+            "row": len(rows) + 1,
             "report_id": r.report_id,
             "hole": r.company_hole_id or r.hole_id,
             "verdict": r.verdict,
@@ -378,12 +379,13 @@ def manifest(write_csv: str | None = None):
 
     print(f"\n  {len(rows)} reviewable rows. Check each verdict "
           f"against the page named here.\n")
-    print(f"  {'report':14s} {'hole':10s} {'verdict':12s} {'conf':7s} "
+    print(f"  {'#':>3s} {'report':14s} {'hole':10s} {'verdict':12s} {'conf':7s} "
           f"{'qv':5s} page")
-    for x in rows:
-        print(f"  {x['report_id']:14s} {str(x['hole']):10s} {x['verdict']:12s} "
-              f"{str(x['confidence']):7s} {str(x['quote_verified']):5s} "
-              f"{x['page']:>5s}" + ("" if x["resolves"] else "   <-- UNRESOLVED"))
+    for j, x in enumerate(rows, 1):
+        print(f"  {j:>3d} {x['report_id']:14s} {str(x['hole']):10s} "
+              f"{x['verdict']:12s} {str(x['confidence']):7s} "
+              f"{str(x['quote_verified']):5s} {x['page']:>5s}"
+              + ("" if x["resolves"] else "   <-- UNRESOLVED"))
     print(f"\n  all rows live under: {pdf_dir}")
     print(f"  {len(rows)-missing}/{len(rows)} resolve to a real file and page")
     if write_csv:
@@ -401,9 +403,19 @@ def review(sample_pct: int = 10, seed: int = 0, sample_n: int | None = None) -> 
     df = pd.concat(frames, ignore_index=True)
     n = sample_n or max(1, round(len(df) * sample_pct / 100))
     n = min(n, len(df))
-    random.seed(seed)
-    idx = random.sample(range(len(df)), n)
-    print(f"\nQA gate: reviewing {n} of {len(df)} ({sample_pct}%).")
+    if n >= len(df):
+        # Reviewing everything: keep manifest order. `random.sample(range(N), N)`
+        # is a permutation, so the old code shuffled a full review for no reason
+        # and the rows stopped lining up with `--manifest`, which is the table a
+        # reviewer has open beside them.
+        idx = list(range(len(df)))
+        how = "all rows, in manifest order"
+    else:
+        random.seed(seed)
+        idx = sorted(random.sample(range(len(df)), n))
+        how = f"random sample, seed {seed}, shown in manifest order"
+    pct = 100.0 * n / max(1, len(df))
+    print(f"\nQA gate: reviewing {n} of {len(df)} ({pct:.0f}%) — {how}.")
     if n < 10:
         print(f"\n  WARNING: {n} rows cannot establish 95% precision. The 10% "
               f"rule in\n  PLAN_C5 5.2 assumes a batch far bigger than "
@@ -421,7 +433,7 @@ def review(sample_pct: int = 10, seed: int = 0, sample_n: int | None = None) -> 
     for n_done, i in enumerate(idx, 1):
         r = df.iloc[i]
         pdf = pdf_dir / f"{r['report_id']}.pdf"
-        print(f"\n[{n_done}/{n}] --- {r['report_id']} hole "
+        print(f"\n[{n_done}/{n}] manifest row {i+1} --- {r['report_id']} hole "
               f"{r['company_hole_id'] or r['hole_id']} ({r['year_drilled']})")
         print(f"    VERDICT   : {r['verdict']}")
         print(f"    figures   : {r['best_result']}")

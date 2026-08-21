@@ -1,0 +1,12 @@
+# The doctrine's positive corollary as a one-liner, quoted from PLAN_C4 4.3:
+#   count(nonbarren_holes, 1km) >= 1 AND tenure == open
+#
+# Someone drilled here, hit something worth reporting, and let the ground go.
+# The intercepts come from C5.2's extraction over the assessment reports, so
+# this screen did not exist until that corpus did.
+screen "nonbarren on open ground" commodity orogenic_au juris ON {
+  where:
+    count(nonbarren_holes, 1) >= 1
+    tenure == open
+  limit: 200
+}

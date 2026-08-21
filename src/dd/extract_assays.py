@@ -323,29 +323,52 @@ def run_batch(max_reports: int = 14, min_holes: int = 5, radius_km: float = 0.0,
     return batch
 
 
-def review(sample_pct: int = 10, seed: int = 0) -> None:
+def review(sample_pct: int = 10, seed: int = 0, sample_n: int | None = None) -> None:
     """The binding human QA gate. Interactive by design."""
     import pandas as pd
     if not TIER2.exists() and not NONBARREN.exists():
         sys.exit("no batch to review — run --run first")
     frames = [pd.read_parquet(p) for p in (TIER2, NONBARREN) if p.exists()]
     df = pd.concat(frames, ignore_index=True)
-    n = max(1, round(len(df) * sample_pct / 100))
+    n = sample_n or max(1, round(len(df) * sample_pct / 100))
+    n = min(n, len(df))
     random.seed(seed)
     idx = random.sample(range(len(df)), n)
     print(f"\nQA gate: reviewing {n} of {len(df)} ({sample_pct}%).")
-    print("For each, answer y (verdict correct) / n (wrong) / s (skip).\n")
+    if n < 10:
+        print(f"\n  WARNING: {n} rows cannot establish 95% precision. The 10% "
+              f"rule in\n  PLAN_C5 5.2 assumes a batch far bigger than "
+              f"{len(df)}. Either widen the\n  batch first —\n"
+              f"      python -m dd.extract_assays --run --max-reports 30\n"
+              f"  — or review a fixed count:\n"
+              f"      python -m dd.extract_assays --review --sample-n 20\n")
+    print("You are judging the VERDICT (barren / mineralized / ambiguous),")
+    print("not the prose. 'ambiguous' is the SAFE answer and is correct")
+    print("whenever the excerpts genuinely do not settle it — do not mark it")
+    print("wrong for being cautious.\n")
     correct = judged = 0
-    for i in idx:
+    import reports as R
+    pdf_dir = R.pdf_dir("ON", "ON_AFRI_PDF")
+    for n_done, i in enumerate(idx, 1):
         r = df.iloc[i]
-        print(f"--- {r['report_id']} hole {r['company_hole_id'] or r['hole_id']} "
-              f"({r['year_drilled']})")
-        print(f"    verdict   : {r['verdict']}  (confidence {r['confidence']}, "
-              f"quote_verified={r['quote_verified']})")
-        print(f"    quote     : {str(r['verdict_quote'])[:200]}")
-        print(f"    best      : {r['best_result']}")
-        print(f"    page      : {r['page']}")
-        ans = input("    correct? [y/n/s] ").strip().lower()
+        pdf = pdf_dir / f"{r['report_id']}.pdf"
+        print(f"\n[{n_done}/{n}] --- {r['report_id']} hole "
+              f"{r['company_hole_id'] or r['hole_id']} ({r['year_drilled']})")
+        print(f"    VERDICT   : {r['verdict']}")
+        print(f"    figures   : {r['best_result']}")
+        print(f"    quote     : {str(r['verdict_quote'])[:220]}")
+        print(f"    confidence: {r['confidence']}   "
+              f"quote_verified: {r['quote_verified']}")
+        if r["quote_verified"] is True:
+            print("      NOTE quote_verified means the TEXT is on that page. It "
+                  "does NOT mean\n           the numbers were read correctly — "
+                  "OCR'd assay grids are where\n           that breaks. Check "
+                  "the figures against the page.")
+        # The whole point of the gate is comparing against the source, so make
+        # opening the source a copy-paste rather than a hunt.
+        print(f"    CHECK IT  : {pdf}  page {r['page']}")
+        print(f"                xdg-open '{pdf}'   # then go to page {r['page']}")
+        ans = input("    verdict correct? [y/n/s=skip] ").strip().lower()
         if ans == "y":
             correct += 1
             judged += 1
@@ -381,6 +404,8 @@ def main():
     ap.add_argument("--plan", action="store_true", help="list candidate reports")
     ap.add_argument("--run", action="store_true")
     ap.add_argument("--review", action="store_true", help="the human QA gate")
+    ap.add_argument("--sample-n", type=int, default=None,
+                    help="review a fixed count instead of 10%%")
     ap.add_argument("--status", action="store_true")
     ap.add_argument("--max-reports", type=int, default=14)
     ap.add_argument("--min-holes", type=int, default=5)
@@ -398,7 +423,7 @@ def main():
         run_batch(args.max_reports, args.min_holes, limit_holes=args.limit_holes)
         return
     if args.review:
-        review()
+        review(sample_n=args.sample_n)
         return
     if args.status:
         status()

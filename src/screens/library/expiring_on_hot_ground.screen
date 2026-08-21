@@ -1,0 +1,14 @@
+# The expiring-claims screen. Feeds lapse-watch rule (c) in C1.6 — a saved
+# screen's result set is itself one of the watch triggers, so this closes that
+# loop.
+#
+# `tenure == expiring(N)` reads lapse_watch.parquet, which is a WATCH list:
+# status is watch_only and never "stakeable". Ground here has not reopened and
+# may never — 12,116 Ontario claims are past due and still held.
+screen "expiring on hot ground" juris ON {
+  where:
+    tenure == expiring(30)
+    heat >= percentile(75)
+  rank by: heat
+  limit: 100
+}

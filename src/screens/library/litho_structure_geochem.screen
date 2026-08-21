@@ -1,0 +1,17 @@
+# Lithology + structure + geophysics, the plan's first named screen.
+#
+# "geochem" in PLAN_C4 4.3 anticipates C2.3, which is not built — the geochem
+# anomaly layer is a Phase 3 item and QC/BC geochem does not process yet
+# (audit O3). The gravity-gradient term stands in for it: an HGM ridge marks a
+# density contact, which is the same kind of evidence for a structural corridor
+# that a soil anomaly would be. Substitution stated rather than silently made.
+screen "greenstone structure corridor" commodity orogenic_au juris ON {
+  where:
+    fault__km < 3
+    cmmi_gravity__gravity_hgm__mean >= percentile(80)
+    cmmi_magnetic__mag_rtp_hgm__stdev >= percentile(70)
+    no_barren(commodity=Au)
+    tenure == open
+  rank by: cmmi_gravity__gravity_hgm__mean
+  limit: 100
+}

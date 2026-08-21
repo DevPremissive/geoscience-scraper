@@ -240,12 +240,14 @@ def extract_hole(tid: str, hole: dict, k: int = 8) -> dict:
 
 
 def run_batch(max_reports: int = 14, min_holes: int = 5, radius_km: float = 0.0,
-              limit_holes: int | None = None, quiet: bool = False) -> dict:
+              limit_holes: int | None = None, quiet: bool = False,
+              year_from: int = 1985, year_to: int = 1999) -> dict:
     """Fetch, ingest and extract over a batch of drilling reports."""
     import pandas as pd
     import reports as R
 
-    cands = candidate_reports(min_holes=min_holes, limit=max_reports * 2)
+    cands = candidate_reports(min_holes=min_holes, limit=max_reports * 3,
+                              year_from=year_from, year_to=year_to)
     batch_reports, rows = [], []
     processed = 0
 
@@ -257,13 +259,25 @@ def run_batch(max_reports: int = 14, min_holes: int = 5, radius_km: float = 0.0,
         tid = f"ON-report-{rid}"
         pdf = R.pdf_dir("ON", "ON_AFRI_PDF") / f"{rid}.pdf"
         if not pdf.exists():
+            # Ask the publisher what the file is called. The legacy
+            # `{id}.Pdf` pattern only covers the pre-2000 scanned era, and
+            # calling sc.pdf_url() here was the reason every modern report came
+            # back "not retrievable" — the P9 fix had been applied to
+            # fetch_reports() and not to this path.
             from connectors import scrape as SC
             sc = SC.SCRAPERS["ON_AFRI_PDF"]
-            try:
-                R._download(sc.pdf_url(rid), pdf)
-            except Exception as e:                              # noqa: BLE001
+            base = sc.pdf_url(rid).rsplit("/", 1)[0]
+            got = False
+            for fn in R.resolve_pdf_files(rid, "ON"):
+                try:
+                    R._download(f"{base}/{fn}", pdf)
+                    got = True
+                    break
+                except Exception:                               # noqa: BLE001
+                    continue
+            if not got:
                 if not quiet:
-                    print(f"  - {rid}: not retrievable ({type(e).__name__})")
+                    print(f"  - {rid}: not retrievable")
                 continue
         # Ingest this single report into its own collection.
         try:
@@ -351,6 +365,7 @@ def run_batch(max_reports: int = 14, min_holes: int = 5, radius_km: float = 0.0,
 
     batch = {
         "batch_id": f"assay-{len(batch_reports)}r-{processed}h",
+        "era": f"{year_from}-{year_to}",
         "reports": batch_reports, "holes_processed": processed,
         "verdicts": df["verdict"].value_counts().to_dict(),
         "quote_verified": int(df["quote_verified"].fillna(False).sum()),
@@ -550,16 +565,21 @@ def main():
     ap.add_argument("--min-holes", type=int, default=5)
     ap.add_argument("--limit-holes", type=int, default=None,
                     help="cap holes per report (for a quick pass)")
+    ap.add_argument("--year-from", type=int, default=1985)
+    ap.add_argument("--year-to", type=int, default=1999)
     args = ap.parse_args()
     C.require_lake()
 
     if args.plan:
-        for c in candidate_reports(min_holes=args.min_holes, limit=args.max_reports):
+        for c in candidate_reports(min_holes=args.min_holes, limit=args.max_reports,
+                                   year_from=args.year_from, year_to=args.year_to):
             print(f"  {c['report_id']:14s} {c['holes']:3d} holes  "
                   f"{int(c['year'] or 0)}  {(c.get('property') or '')[:40]}")
         return
     if args.run:
-        run_batch(args.max_reports, args.min_holes, limit_holes=args.limit_holes)
+        run_batch(args.max_reports, args.min_holes,
+                  limit_holes=args.limit_holes,
+                  year_from=args.year_from, year_to=args.year_to)
         return
     if args.review:
         review(sample_n=args.sample_n)

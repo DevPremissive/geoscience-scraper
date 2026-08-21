@@ -1683,6 +1683,137 @@ it. Nothing in C2.2 touched `mapapi.py`.
 
 ---
 
+## P. C3.4 and C5.1/C5.2 build findings (2026-08-21)
+
+### P1. Ontario AFRI PDFs are the scanned-paper era only — 0/12 for 2010+
+
+`connectors/scrape.py` records the blob pattern `{id}/{id}.Pdf` as an "observed
+pattern". It is observed and it does not generalise. Measured over a 60-id
+stratified sample of the 62,436 technical-file records:
+
+| era | retrievable |
+|---|---|
+| pre-1990 | 10/12 |
+| 1990s | 11/12 |
+| no year | 9/12 |
+| 2000s | 2/12 |
+| **2010+** | **0/12** |
+
+Modern MLAS-era submissions (`2000002xxxx` ids) return Azure `BlobNotFound`.
+Neither the MLAS transaction id, the work-report number, nor any alternate
+folder resolves them; the container refuses prefix listing; and the
+GeologyOntario Elasticsearch record carries commodities, authors and claim
+numbers but **no filename**. Retrieving them needs a devtools capture of the
+SPA's own download call — the 1-4 day exercise `SCRAPERS_BLOCKED.md` scopes for
+other jurisdictions.
+
+This is surfaced rather than smoothed over, and the reason is specific: the C5.1
+question set asks "why did work stop". Against a corpus silently missing
+everything after 2000, the honest-looking answer "work stopped in 1998" would be
+wrong about ground drilled in 2021. `coverage_summary()` therefore names every
+missing report by id and year, and dossier section 7 prints them.
+
+### P2. The OCR blocker does not exist for Ontario
+
+PLAN_C5 5.1 makes OCR central: "a large fraction of pre-1990 assessment reports
+are scans; without OCR the corpus's best negatives and intercepts are
+invisible", and specifies an ocrmypdf/tesseract fallback. Measured over the
+first 303 pages retrieved: **7 pages, 2%, fall below the text threshold.**
+Ontario has already OCR'd its AFRI holdings and ships a text layer.
+
+Neither ocrmypdf nor tesseract is installed and neither was needed. Low-text
+detection is still implemented and still reports what it finds, because BC ARIS
+may differ and a jurisdiction with raw scans must not silently yield an empty
+corpus — but the dependency is not on the critical path, and no system packages
+were installed to discover that.
+
+### P3. Table extraction does not work on these pages, by any of the planned routes
+
+PLAN_C5 5.2 step 2 specifies "pdfplumber first, camelot fallback". Neither is
+installed, and installing them would not help: **PyMuPDF's own table finder
+returns zero tables** on the assay pages. These are scans without ruling lines,
+so there is no table structure to detect — only OCR'd text in roughly tabular
+order.
+
+The consequence is visible in the output and is recorded on every batch. The
+LLM reads the *text* of table-dense pages, which works for prose statements of
+results and fails on gridded assay sheets. One extracted intercept reads
+`Au 50.000, Zn 741.000, As 741.000` with Zn and As identical — column values
+misread from a garbled grid. Its `quote_verified` is **True**, because the
+quoted table header genuinely is on the page: **quote verification proves the
+text was there, not that the number was read correctly.** That distinction is
+the reason C5.2's QA gate is human and binding.
+
+### P4. Barren is much harder to extract than mineralized, and the plan treats them as symmetric
+
+C5.2 pairs "barren confirmation" and "intercept extraction" as two outputs of
+one pipeline. Over 72 holes across 12 reports the split was:
+
+    mineralized 16 · barren 2 · ambiguous 54
+
+Mineralization gets stated in prose — "DDH 104: 0.30 across 3 feet" — because it
+is the reason the report exists. **Barrenness is usually recorded as a table of
+blanks, or not recorded at all**, and the two clean barren verdicts both came
+from unusually explicit sentences ("those in H-1 being NIL", "INTERSECTED NO AU
+MINERALIZATION").
+
+So the Tier-1 → Tier-2 upgrade path, which is C5.2's stated *purpose*, yields
+far less than the intercept extraction that the plan treats as its corollary.
+Two Tier-2 candidates from 72 holes is not a labelling pipeline. Either barren
+confirmation needs parsed tables (P3), or it needs to accept that "no assay
+table row for this interval" is the evidence and reason over structure rather
+than prose.
+
+### P5. A reasoning model returned "not found" six times out of six
+
+`qwen3.6-35b` on :8082 emits its chain in `reasoning_content` and the answer in
+`content`. Over a 21k-character excerpt block it spent all 2,000 completion
+tokens thinking, returned `finish_reason: length` and an **empty** `content` —
+and because empty content fell through to the not-found default, the entire
+six-question set reported "not found" with no error anywhere to explain it.
+
+Two fixes, one of them the interesting one: an empty `content` with
+`finish_reason: length` now raises instead of being read as an answer, and
+thinking is disabled outright. Disabling it is not a workaround but a better
+setting — **8 seconds versus 113, with an equally good answer**, because
+extraction-with-citation does not need a chain of thought; it needs accurate
+copying and a willingness to refuse.
+
+### P6. Dense retrieval cannot find a figure; the lexical pass is not optional
+
+Asked for "best historical results", embedding retrieval returned pages *about*
+assaying — how many samples were taken, which lab — and missed the sentence
+"assays up to 5.5% Cu over 10m", because that sentence sits in a chunk whose
+overall subject is regional geology. Three different phrasings of the retrieval
+query all missed it.
+
+A grade is a number against a unit, which is a lexical signature, and the
+questions that must quote figures now run a regex pass alongside the dense one.
+This is cheap only because the corpus is **per-target** — 581 chunks, scannable
+in full. It is a concrete argument for C5.1's per-target design over C5.3's
+corpus-scale one, beyond politeness to the publisher.
+
+### P7. The hole → report link was already published
+
+PLAN_C5 5.2 step 1 expects `(hole_id, report_id)` pairs "from OAFD/ARIS index
+metadata ... or from 5.1 retrieval when the link is implicit". No inference is
+needed in Ontario: **all 172,259 rows of `ON_OMEIS_DRILLHOLE` carry a
+`TECH_ID`**, which is the assessment report the hole came from. C5.2's step 1 is
+a join, and it is complete province-wide — which also means the batch selection
+for a future run can be driven straight off hole counts per report.
+
+### P8. What C3.4 cost, against its estimate
+
+PLAN_C3 3.4 budgets ~3-4 days for ON+BC. Ontario took a fraction of that,
+because audit C1's correction had already done the hard part: the resolver input
+(`ON_OMEIS_TECHFILE`, 62,436 records with geometry) was harvested, the scraper
+was written and `ready()`, and `harvest_pdfs.py` had the download plumbing. The
+work was a spatial query, a per-target fetch loop and the coverage accounting in
+P1. BC ARIS remains unbuilt and is not needed for Gate G2.
+
+
+---
+
 ## Change log
 
 - **2026-08-13** — initial audit; all findings above recorded after a second challenge pass. Six first-pass conclusions were corrected: B1 strengthened, B2 reframed, B4/D3/D5-Chroma downgraded, A2 qualified.
@@ -1692,3 +1823,4 @@ it. Nothing in C2.2 touched `mapapi.py`.
 - **2026-08-18 (C4.2 pass)** — section M: C6.2 had been built ahead of C2.2 and C4.2, and the handoff's C6.3 recommendation could not have met its own acceptance without a viewer (M0); `blocks.geometry_wkt` is EPSG:3978 and silently matched nothing against a lon/lat envelope (M1); a parquet cache keyed on less than it stored failed only under the live server's call order (M2); the event scrubber spanned Yukon's 1899 paper record while its layer drew Ontario (M3); `update_all.py` ran a national harvest on import (M4); the viewer and its figures now make no outbound request at all (M5); H3 parent aggregation defers the MVT pipeline (M6); and Nunavut, recorded dead upstream on 2026-08-17, was re-harvested by the daily timer on 2026-08-18 with owners, staking dates and retained cancellations (M7).
 - **2026-08-20 (C2.2 pass)** — section N: for Ontario the CMMI release is the geophysics modality rather than a benchmark, closing that gap without C3.2 (N1); the plan's sediment-thickness layer does not exist and the published surfaces are Zn-Pb against our orogenic-Au model (N2); the CD GeoTIFF ships with no CRS, so `ingest()` now takes an evidenced assertion (N3) after two silent failures left the registry describing a file that did not exist (N4); cross-system rank agreement is reported as a sanity check, not a score, and ρ=−0.50 against MVT is the geologically correct sign (N5); the release's own H3 r7 geology grid validates our fabric at 99.53% once deliberate lake clipping is set aside, while the lithology comparison is inconclusive because the taxonomy crosswalk dominates (N6); `write_features` said append and overwrote, and C2.2 as the second producer erased the 239 geology features until it was fixed (N7); publisher MD5s are now verified (N8).
 - **2026-08-20 (bug-fix pass)** — section O: `process_one` now streams layers instead of holding them (O1) and batches tables by cells rather than rows (O2), but QC_SIGEOM_GEOCHEM still OOMs and the handoff's account of why was wrong — its spatial layers were never at risk, the failure is in two 1,629- and 650-column tables, and the machine only had ~19 GB free (O3); two silent bugs introduced by O1, one of which renamed a layer C1.1 references by name (O4); gap #15 closed now that Saskatchewan is back — SK_SMDI 140 → 6,012 plus 33,490 drillholes (O5); the cell popover went from 2.3 s to 0.4 ms after C2.2 grew the feature store tenfold (O6).
+- **2026-08-21 (C3.4 + C5.1/C5.2 pass)** — section P: Ontario AFRI PDFs cover the pre-2000 scanned era and 0/12 of 2010+, so every retrieval gap is named by id and year (P1); the OCR blocker PLAN_C5 builds around does not exist for Ontario, which ships a text layer on 98% of pages (P2); table extraction fails by every planned route and quote verification proves presence, not correctness (P3); barren is much harder to extract than mineralized — 2 vs 16 over 72 holes — so C5.2's stated purpose yields less than its corollary (P4); a reasoning model reported not-found six times out of six by spending its budget thinking (P5); dense retrieval cannot find a figure, and the lexical pass that fixes it is affordable only because the corpus is per-target (P6); the hole-to-report link is already published on all 172,259 drillholes (P7).

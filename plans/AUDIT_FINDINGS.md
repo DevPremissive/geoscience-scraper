@@ -1582,6 +1582,107 @@ rather than only against ourselves.
 
 ---
 
+## O. Bug-fix pass (2026-08-20)
+
+### O1. `process_one` held every frame; it now streams
+
+The 2026-08-18 handoff listed "QC geochem spatial pass OOMs — `process_one`
+accumulates every frame for a source before grouping". True, and fixed: a
+metadata pass (`pyogrio.read_info`, headers only) establishes the distinct-schema
+count and therefore each layer's final name before anything is loaded, then each
+layer is read, written or appended, and dropped. Duplicate detection keeps a
+fingerprint instead of the frame.
+
+Measured against byte-identical output: `ON_CLAIMS2` 356 tiles at **259 MB peak**
+for 401,705 rows; `ON_MLAS_TENURE` 8 layers, every name and count unchanged, 904
+MB peak; Nova Scotia's dedupe still fires at 2,226 rather than 4,454.
+
+### O2. Batch size was a row count, so peak memory tracked the publisher's schema width
+
+`_table_to_parquet` already streamed in Arrow batches — the fix a previous
+session made — but with the default 65,536-row batch. Québec ships
+`R1E03_RESULTAT_ANALYSE_ES` at 21,237,346 × 16 **and**
+`R1E01_ECHANTILLON_ROCHE_RESULTAT` at 582,192 × **1,629** from the same file. At
+1,630 columns one batch is 0.87 GB. Batches are now budgeted by cells, which
+took the observed peak from 19 GB to 6 GB.
+
+### O3. QC_SIGEOM_GEOCHEM still fails — and the handoff's description of why was wrong
+
+It is still OOM-killed, silently (SIGKILL leaves no traceback; the log simply
+stops). Three corrections to what was recorded:
+
+- **The handoff said "a source shipping ONLY a wide GPKG would lose its spatial
+  layers".** This source ships exactly that, and its spatial layers are not lost:
+  they arrive via the `.shp` sibling, which is why
+  `QC__QC_SIGEOM_GEOCHEM__Echantillon_*` (224,190 / 358,002 / 561,232) have been
+  in `geo.gpkg` all along. **Nothing is currently missing from the lake because
+  of this bug.** What fails is the wide *attribute* tables, which are C2.3
+  geochem inputs, not a Phase-1 blocker.
+- **The container is 7.4 GB inside a ZIP misnamed `.gpkg`** (audit A3's pattern),
+  holding 11 layers of which the two largest are 582,192 × 1,629 and 561,232 ×
+  650 — roughly 948 million and 365 million cells.
+- **Headroom is the other half of it.** This machine has 62 GB with
+  `llama-server` holding 11.5 GB, leaving ~19 GB available — which is exactly
+  where the process died. The same run might complete with the LLM stack down.
+
+The remaining fix is to stream the *vector* path the way the table path now
+streams, and to cap parquet row-group size. Not attempted here rather than
+rushed at the end of a session.
+
+### O4. Two silent bugs introduced by O1, both found by testing
+
+Worth recording because both are the same shape as defects this audit keeps
+finding elsewhere:
+
+- `info.get("fields") or []` — `fields` is a numpy array, and `arr or []` raises
+  "truth value of an array is ambiguous". A bare `except Exception` turned that
+  into "this layer has no fields", every schema came back empty, the
+  distinct-schema count collapsed to 1, and the first layer written took the
+  unsuffixed name reserved for single-schema sources. That renamed
+  `ON__ON_MLAS_TENURE__Mining_Land_Tenure`, which `land/open_ground.py`'s
+  subtraction stack references **by name** — C1.1 would have started reporting
+  ground as unwithdrawn.
+- A second schema could reuse the first's layer name and open it `mode="w"`,
+  silently replacing a layer written moments earlier.
+
+**Third and fourth bare-except failures in two sessions** (with `coverage.py`'s
+`_rasters` and `cmmi.py`'s CRS path). The pattern is consistent enough to state
+as a rule: in this codebase a broad `except` around a *parsing* step reliably
+converts a crash into a wrong answer that survives review.
+
+### O5. Gap #15 closed — the Saskatchewan outage cleared
+
+Audit I3 diagnosed `SK_SMDI`'s 140 rows as our own hardcoded `layers=1` and could
+not fix it: `gis.saskatchewan.ca` was returning 500 `SITE_NOT_INITIALIZED`
+service-wide. The service is back as of 2026-08-20 and enumeration confirms the
+diagnosis exactly. One FeatureServer:
+
+    1  Mine Locations                          140   <- what both SK codes took
+    2  Mineral Deposits Index (SMDI)         6,012
+    3  Minerals and Quaternary Drillholes   33,490
+    5  Mineral Resource Assessment           2,664
+
+`SK_MINERAL_EXPLORATION` was also on sub-layer 1, so both codes reported 140 —
+correct for Mine Locations, and a name that oversells what it holds. SMDI now
+takes sub-layer 2 through the REST FeatureServer; `SK_DRILLHOLE` (sub-layer 3)
+registered while the service was open. The Hub connector's hardcoded `layers=1`
+is now a per-item registry field, as I3 said it needed to become either way.
+
+### O6. The cell popover was scanning 10.7 M rows per feature
+
+`mapapi._feature_percentiles` masked the whole feature frame once per feature on
+the cell — 66 features meant 66 full scans. Unnoticed at 1 M rows; at 2.3 s per
+click after C2.2 grew the store tenfold it was the slowest thing in the viewer,
+and every dossier assembly paid it too. A cached `{feature: sorted values}` index
+makes each percentile a `searchsorted`: **2.3 s → 0.4 ms**, with a 198-value
+cross-check confirming the numbers are identical and not merely faster.
+
+A component that grows a shared store tenfold should re-measure whatever reads
+it. Nothing in C2.2 touched `mapapi.py`.
+
+
+---
+
 ## Change log
 
 - **2026-08-13** — initial audit; all findings above recorded after a second challenge pass. Six first-pass conclusions were corrected: B1 strengthened, B2 reframed, B4/D3/D5-Chroma downgraded, A2 qualified.
@@ -1590,3 +1691,4 @@ rather than only against ourselves.
 - **2026-08-18 (C6.2 pass)** — section L: the SEDAR+ corpus C3.5 planned to fetch is already on disk (1,401 issuers, 658,812 filings), so C6.2 makes no network call; Ontario publishes no claim transfers but 110,206 geometric pickups; two measurement traps (r7 co-occurrence, unparsed HOLDER) and one threshold-from-a-prior corrected; 23 captured issuer profiles found to be stubs.
 - **2026-08-18 (C4.2 pass)** — section M: C6.2 had been built ahead of C2.2 and C4.2, and the handoff's C6.3 recommendation could not have met its own acceptance without a viewer (M0); `blocks.geometry_wkt` is EPSG:3978 and silently matched nothing against a lon/lat envelope (M1); a parquet cache keyed on less than it stored failed only under the live server's call order (M2); the event scrubber spanned Yukon's 1899 paper record while its layer drew Ontario (M3); `update_all.py` ran a national harvest on import (M4); the viewer and its figures now make no outbound request at all (M5); H3 parent aggregation defers the MVT pipeline (M6); and Nunavut, recorded dead upstream on 2026-08-17, was re-harvested by the daily timer on 2026-08-18 with owners, staking dates and retained cancellations (M7).
 - **2026-08-20 (C2.2 pass)** — section N: for Ontario the CMMI release is the geophysics modality rather than a benchmark, closing that gap without C3.2 (N1); the plan's sediment-thickness layer does not exist and the published surfaces are Zn-Pb against our orogenic-Au model (N2); the CD GeoTIFF ships with no CRS, so `ingest()` now takes an evidenced assertion (N3) after two silent failures left the registry describing a file that did not exist (N4); cross-system rank agreement is reported as a sanity check, not a score, and ρ=−0.50 against MVT is the geologically correct sign (N5); the release's own H3 r7 geology grid validates our fabric at 99.53% once deliberate lake clipping is set aside, while the lithology comparison is inconclusive because the taxonomy crosswalk dominates (N6); `write_features` said append and overwrote, and C2.2 as the second producer erased the 239 geology features until it was fixed (N7); publisher MD5s are now verified (N8).
+- **2026-08-20 (bug-fix pass)** — section O: `process_one` now streams layers instead of holding them (O1) and batches tables by cells rather than rows (O2), but QC_SIGEOM_GEOCHEM still OOMs and the handoff's account of why was wrong — its spatial layers were never at risk, the failure is in two 1,629- and 650-column tables, and the machine only had ~19 GB free (O3); two silent bugs introduced by O1, one of which renamed a layer C1.1 references by name (O4); gap #15 closed now that Saskatchewan is back — SK_SMDI 140 → 6,012 plus 33,490 drillholes (O5); the cell popover went from 2.3 s to 0.4 ms after C2.2 grew the feature store tenfold (O6).

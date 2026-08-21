@@ -127,14 +127,23 @@ def test_real_ontario_after_signing():
     check("5-year hold of 10 cells computes", sched["grand_total"], 20540.0)
     check("in Canadian dollars", sched["currency"], "CAD")
 
-    # Still shut, and for the right reasons.
+    # Open as of 2026-08-21 — but opened by recorded ASSUMPTIONS, not citations,
+    # and the record of which ones must survive. A gate that clears without
+    # leaving evidence of what cleared it is worse than one that stays shut.
     ok, missing = R.stakeable_now("ON")
-    check("ON still not stakeable", ok, False)
-    check("sign-off no longer the blocker",
-          any("verified_by" in m for m in missing), False)
-    for field in ("consultation_notes", "exempt_lands_notes"):
-        check(f"{field} still named as missing",
-              any(field in m for m in missing), True)
+    check("ON is cleared for a staking decision", ok, True)
+    check("nothing left unexplained", missing, [])
+    scope = rules.get("assumptions_scope") or []
+    for field in ("consultation_notes", "exempt_lands_notes", "transfer.fee"):
+        check(f"{field} cleared by a recorded assumption", field in scope, True)
+    check("the assumptions name who accepted them",
+          bool(rules.get("assumptions_accepted_by")), True)
+    rn = rules.get("notes") or {}
+    for field in scope:
+        check(f"{field} note explains the assumption",
+              len((rn.get(field) or "").strip()) > 80, True)
+    check("the transfer fee is still null, not invented",
+          rules["transfer"]["fee"], None)
 
     # C1.6's numeric gate, sourced from the MNDM relief-from-forfeiture policy.
     mech = rules["expiry_mechanics"]
@@ -160,15 +169,17 @@ def main():
             print("  " + f)
         sys.exit(1)
     print("all arithmetic tests pass")
-    print("C1.2 acceptance: BOTH halves now done. The arithmetic is tested above, "
-          "and\nOntario was signed by Devlen M on 2026-08-21 after review.\n\n"
-          "STILL OPEN, and stakeable_now('ON') stays False until they are filled:\n"
-          "  consultation_notes   — duty-to-consult triggers for early exploration\n"
-          "  exempt_lands_notes   — exempt lands\n"
-          "  transfer.*           — the Ontario schedule has no claim-transfer fee;\n"
-          "                         item 8 is LEASE transfer and item 15 is instrument\n"
-          "                         recording, and calling either one it is\n"
-          "                         interpretation rather than citation (audit H).")
+    print("C1.2 acceptance: BOTH halves done. Ontario signed by Devlen M on\n"
+          "2026-08-21, and stakeable_now('ON') is now True.\n\n"
+          "IT CLEARED ON ASSUMPTIONS, NOT CITATIONS — six of them, listed in\n"
+          "rules/ON.yaml under `assumptions_scope` and reprinted in every dossier.\n"
+          "The two worth checking first, in this order:\n"
+          "  credit_banking.transferable_with_claim — feeds C6.5's 'runway a buyer\n"
+          "      inherits', so an error here lands straight in a price.\n"
+          "  transfer.fee — still null ON PURPOSE. Ontario schedules no\n"
+          "      claim-transfer fee at all (audit H). Treat as UNKNOWN, never as\n"
+          "      zero: assuming zero understates cost, which is the direction\n"
+          "      that loses money.")
 
 
 if __name__ == "__main__":

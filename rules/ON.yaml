@@ -68,7 +68,7 @@ cash_in_lieu:
 credit_banking:
   allowed: true
   max_years_forward: 5
-  transferable_with_claim: null
+  transferable_with_claim: true    # [ASSUMPTION] see notes.credit_banking.transferable_with_claim
 
 # PARTIALLY SOURCED. The fee schedule has NO line item for transferring a mining
 # CLAIM. Item 8 ($100 + HST) is consent to transfer a mining LEASE or licence of
@@ -78,9 +78,9 @@ credit_banking:
 # reading it as the claim-transfer fee is an interpretation, not a citation, so
 # it is left null.
 transfer:
-  allowed: null
-  fee: null
-  process: null
+  allowed: true          # [ASSUMPTION] see notes.transfer.allowed
+  fee: null              # [NOT SCHEDULED] see notes.transfer.fee
+  process: "MLAS online transfer between licensed holders"   # [ASSUMPTION]
 
 # [SOURCED] O. Reg. 65/18 s.1 for the assessment year; MNDM "Relief from
 # Forfeiture of Unpatented Mining Claims" policy for the forfeiture and
@@ -257,3 +257,75 @@ open_questions:
      regulated boundary. Confirm ON_PARKS_REGULATED is the layer with legal effect."
   - "Confirm Indian Reserve (ON_INDIAN_RESERVE, 246) is correctly treated as withdrawn.
      It IS currently subtracted as `withdrawn` in C1.1's stack."
+
+# ---------------------------------------------------------------------------
+# OPERATING ASSUMPTIONS — read before relying on anything below.
+#
+# `missing_fields()` treats a null field as answered when `notes` explains it.
+# These entries use that mechanism deliberately, and they are ASSUMPTIONS, not
+# citations. Devlen M decided on 2026-08-21 that they should not block the
+# build, so `stakeable_now("ON")` now returns True and the dossier will discuss
+# acquisition. Each one is written so that a reader can see exactly what is
+# being assumed and disagree with it.
+#
+# The distinction the rest of this file uses still holds: [SOURCED] means a
+# quotation with a citation; [ASSUMPTION] means a defensible reading that nobody
+# has had checked by a person qualified to check it.
+assumptions_accepted_by: Devlen M
+assumptions_accepted_date: 2026-08-21
+assumptions_scope:
+  - consultation_notes
+  - exempt_lands_notes
+  - transfer.allowed
+  - transfer.fee
+  - transfer.process
+  - credit_banking.transferable_with_claim
+
+notes:
+  consultation_notes: >
+    [ASSUMPTION] Registering a mining claim in MLAS does not itself trigger the
+    duty to consult; the duty attaches to exploration ACTIVITY, through the
+    exploration plan (lower-impact) and exploration permit (higher-impact)
+    regime, where the ministry notifies affected Indigenous communities before
+    work may proceed. The practical consequence for this system is that ground
+    can be staked without a consultation step, and that consultation time and
+    cost must be budgeted before any work is done on it — so a holding-cost
+    figure is NOT an all-in cost to explore. Not reviewed by anyone qualified in
+    Aboriginal law. Verify before committing to a work programme, not before
+    staking.
+  exempt_lands_notes: >
+    [ASSUMPTION] Lands not open for claim registration are handled
+    operationally rather than as a list here, because a list in this file would
+    go stale and this one would go stale silently. C1.1's subtraction stack is
+    the operative check: provincial parks, conservation reserves, federal
+    protected areas, and the MLAS withdrawal layers (Mining Land Tenure,
+    Non-Mining Land Tenure, Plans & Permits) are subtracted before any cell is
+    called open, and `land_state` carries `blocking_layer` per cell. Known gaps
+    are recorded in the AOI's own metadata under `missing_encumbrances` and
+    `pending_legal_review`, and the dossier prints them. Surface rights, private
+    patents and First Nations reserve land are the categories most likely to be
+    incompletely represented.
+  transfer.allowed: >
+    [ASSUMPTION] Unpatented mining claims are transferable between licensed
+    holders through MLAS. This is how the register behaves — the cancelled and
+    operational registers both show holder changes — but no fee-schedule or
+    regulation line was located that states it as a permission.
+  transfer.fee: >
+    [NOT SCHEDULED — audit H] The Ontario Administrative Fees for Mining Lands
+    schedule has NO line item for transferring a mining CLAIM. Item 8 is consent
+    to transfer a mining LEASE or licence of occupation; item 15 is recording an
+    instrument. Calling either of them the claim-transfer fee would be
+    interpretation presented as citation, so this stays null on purpose. Treat
+    the transfer fee as UNKNOWN and not as zero: a valuation that assumes zero
+    is understating cost, which is the direction that loses money.
+  transfer.process: >
+    [ASSUMPTION] Effected online in MLAS between parties holding valid
+    prospector's licences, recorded against the claim's abstract.
+  credit_banking.transferable_with_claim: >
+    [ASSUMPTION] Assessment work credits applied to a claim travel with the
+    claim on transfer, and reserve credits held by the holder do not. O. Reg.
+    65/18 provides for applying credits from a reserve to a claim and for
+    allocating them to contiguous mining lands, which implies credits are
+    attached to lands once applied. This matters directly to C6.5's
+    `credit_position` and to the "runway a buyer inherits" figure, so if any
+    assumption in this file deserves checking first, it is this one.

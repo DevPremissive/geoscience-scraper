@@ -185,6 +185,24 @@ def _land_section(cell_id: str, juris: str):
             "signed for the fee schedule and forfeiture timing, but "
             "stakeable_now() is still False on: " + "; ".join(missing) +
             ". The holding cost above is real; clearance to acquire is not.")
+    else:
+        # The gate opened on assumptions, not on citations. Say which, and say
+        # it here rather than in the rules file where nobody reading a dossier
+        # will look. A cleared gate that hides what cleared it is worse than a
+        # shut one.
+        scope = rules.get("assumptions_scope") or []
+        if scope:
+            rn = rules.get("notes") or {}
+            notes.append(
+                "CLEARED ON ASSUMPTIONS, NOT CITATIONS. "
+                f"{rules.get('assumptions_accepted_by')} accepted on "
+                f"{rules.get('assumptions_accepted_date')} that these fields "
+                f"should not block: " + ", ".join(scope) + ". They are "
+                "defensible readings that no qualified person has checked.")
+            for f in scope:
+                txt = (rn.get(f) or "").strip()
+                if txt:
+                    notes.append(f"ASSUMED — {f}: {txt}")
     figures = []
     fig, why = _figure(
         "land_inset", f"{cell_id} - land context",

@@ -137,19 +137,54 @@ def _land_section(cell_id: str, juris: str):
             notes.append(f"PENDING LEGAL REVIEW ({pend['features']} features): "
                          f"{pend['layer'].split('__')[-1]} — {pend['why']}")
 
-    # Staking cost and prerequisites — only if the rules are signed.
+    # Two different claims, and they stopped being the same thing when Ontario
+    # was signed on 2026-08-21:
+    #
+    #   "here is what it costs to hold this"  needs the fee schedule attested
+    #   "you may decide to stake this"        needs the WHOLE rules gate
+    #
+    # The fees are signed, so the cost is quotable. `stakeable_now` is still
+    # False because duty-to-consult and exempt lands are unreviewed, so the
+    # dossier still must not read as clearance to acquire.
+    rules = R.load(juris)
+    signed = R.is_verified(rules)
     ok, missing = R.stakeable_now(juris)
-    if ok:
+    if signed:
         sched = R.holding_schedule(juris, 1, 5)
-        facts.append(Fact(label="5-year holding cost (1 cell)",
-                          value=sched["grand_total"], unit=sched["currency"],
-                          provenance=_prov(f"rules/{juris}.yaml", "verified")))
-    else:
+        facts.append(Fact(
+            label="5-year holding cost (1 cell)",
+            value=sched["grand_total"], unit=sched["currency"],
+            provenance=_prov(f"rules/{juris}.yaml",
+                             str(rules.get("verified_date") or "verified")),
+            note=f"Signed by {rules.get('verified_by')}. Registration, "
+                 f"assessment work and licence only — this is the cost to HOLD, "
+                 f"not an acquisition price."))
+        mech = rules.get("expiry_mechanics") or {}
+        if isinstance(mech, dict) and mech.get("reopening_delay_days") is not None:
+            facts.append(Fact(
+                label="Ground reopens after expiry",
+                value=mech["reopening_delay_days"], unit="days",
+                provenance=_prov(f"rules/{juris}.yaml",
+                                 str(rules.get("verified_date") or "verified")),
+                note=f"Measured from {mech.get('reopening_delay_measured_from')}; "
+                     f"grace period {mech.get('grace_period_days')} days; opens "
+                     f"{mech.get('reopens_at_local_time')}."))
+            rf = mech.get("relief_from_forfeiture") or {}
+            if rf.get("exists"):
+                notes.append(
+                    "NOT CLEAN TITLE ON DAY ONE — a forfeited claim can be "
+                    "reinstated to its status at the time of forfeiture. "
+                    "Registering on the cells bars the Minister's route, but the "
+                    "Recorder's route survives a new registration where the "
+                    "forfeiture came from a Crown administrative error, and our "
+                    "claim may then carry terms or go to the Mining and Lands "
+                    "Tribunal (Mining Act s.49(1)).")
+    if not ok:
         notes.append(
-            "STAKING COST NOT SHOWN — rules/" + juris + ".yaml is not signed off. "
-            "Outstanding: " + "; ".join(missing[:4]) +
-            ". holding_schedule() refuses to compute from placeholder values, so "
-            "no acquisition cost can be quoted.")
+            "NOT CLEARED FOR A STAKING DECISION. rules/" + juris + ".yaml is "
+            "signed for the fee schedule and forfeiture timing, but "
+            "stakeable_now() is still False on: " + "; ".join(missing) +
+            ". The holding cost above is real; clearance to acquire is not.")
     figures = []
     fig, why = _figure(
         "land_inset", f"{cell_id} - land context",

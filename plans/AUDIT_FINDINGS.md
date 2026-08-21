@@ -1863,6 +1863,57 @@ answers stay fluent and cited, there is just less in them. Only the
 quote-verification count made it legible.
 
 
+### P11. Ontario is signed — and the forfeiture reading was two days out
+
+`rules/ON.yaml` was reviewed and signed by **Devlen M on 2026-08-21**, who also
+supplied the missing forfeiture timing from the MNDM *Relief from Forfeiture of
+Unpatented Mining Claims* policy. The reading offered was "no grace period, and
+claims become stakeable the very next day at 10am". The first half is exactly
+right. The second is two days early, and the policy is explicit:
+
+> "A mining claim will forfeit at 12:00:00 a.m. ... on **the day after the due
+> date** ... The land in the cells ... will become open for the registration of
+> mining claims as of 10:00 a.m. ... on the **second day after the forfeiture**"
+
+    due date              D        (MLAS CLAIM_DUE_)
+    forfeits 00:00:00     D + 1    "the day after the due date"
+    land opens 10:00      D + 3    "the second day after the forfeiture"
+
+Both halves of the "next day at 10am" reading are in the source — the day-after
+and the 10 a.m. — but they attach to different events. `reopening_delay_days` is
+measured from the due date, because `CLAIM_DUE_` is the field `lapse_watch`
+reads, so it is **3**. Encoding 1 would have pointed a buyer at ground two days
+before it opened, which in a competitive staking rush is the whole game.
+
+**And day D+3 is not clean title.** The policy the timing came from is a policy
+about *undoing* forfeiture: a forfeited claim can be reinstated to its status at
+the time of forfeiture — holder, credits and work history. Registering on the
+cells shuts the Minister's route, since the Minister "will not consider" relief
+once "the cells ... are no longer open for claim registration" and a new
+registration is the policy's own worked example. The **Recorder's** route
+survives our registration: where the forfeiture arose from "an administrative
+error on the part of the Crown" the Recorder "may impose terms and conditions on
+the relief from forfeiture order or may refer the matter to the Mining and Lands
+Tribunal" (Mining Act s.49(1)). Narrow trigger, real exposure, now recorded in
+the rules file and printed in dossier section 1.
+
+**Signed is not cleared, and the code had conflated them.** `is_verified` is now
+True, so `holding_schedule` computes — $20,540 for 10 cells over 5 years, and
+$2,090 for one, which reconciles against the four fees accepted on 2026-08-17.
+But `stakeable_now("ON")` is still False: `consultation_notes` and
+`exempt_lands_notes` are still null, as are the `transfer.*` fields that audit H
+established cannot be cited from the Ontario schedule at all. The dossier was
+printing "STAKING COST NOT SHOWN — rules/ON.yaml is not signed off", which after
+signing was simply false, and was withholding a cost it could compute. It now
+distinguishes the two claims: *what it costs to hold* needs the fee schedule
+attested, *whether you may decide to stake* needs the whole gate.
+
+`land/test_rules.py` was rewritten accordingly. It had asserted the system
+refuses until signed; that was the right test for eleven days and is now the
+wrong one. It asserts the arithmetic against the sourced fees, that the sign-off
+is no longer the blocker, and that the gate still names the fields that are.
+
+
 ---
 
 ## Change log
@@ -1876,3 +1927,4 @@ quote-verification count made it legible.
 - **2026-08-20 (bug-fix pass)** — section O: `process_one` now streams layers instead of holding them (O1) and batches tables by cells rather than rows (O2), but QC_SIGEOM_GEOCHEM still OOMs and the handoff's account of why was wrong — its spatial layers were never at risk, the failure is in two 1,629- and 650-column tables, and the machine only had ~19 GB free (O3); two silent bugs introduced by O1, one of which renamed a layer C1.1 references by name (O4); gap #15 closed now that Saskatchewan is back — SK_SMDI 140 → 6,012 plus 33,490 drillholes (O5); the cell popover went from 2.3 s to 0.4 ms after C2.2 grew the feature store tenfold (O6).
 - **2026-08-21 (C3.4 + C5.1/C5.2 pass)** — section P: Ontario AFRI PDFs cover the pre-2000 scanned era and 0/12 of 2010+, so every retrieval gap is named by id and year (P1); the OCR blocker PLAN_C5 builds around does not exist for Ontario, which ships a text layer on 98% of pages (P2); table extraction fails by every planned route and quote verification proves presence, not correctness (P3); barren is much harder to extract than mineralized — 2 vs 16 over 72 holes — so C5.2's stated purpose yields less than its corollary (P4); a reasoning model reported not-found six times out of six by spending its budget thinking (P5); dense retrieval cannot find a figure, and the lexical pass that fixes it is affordable only because the corpus is per-target (P6); the hole-to-report link is already published on all 172,259 drillholes (P7).
 - **2026-08-21 (correction, same day)** — P9: P1 was our bug. The AFRI filename is published in the metadata record's `technical_reports[].file_name`; a diagnostic truncated at 14 keys hid it and produced a confident wrong conclusion that a scraping project was needed. Retrieval goes 53% → 100% across all eras and the Phase-1 corpus 303 → 1,106 pages. P10: that bigger corpus then made answers WORSE at a fixed k=12 (5/6 → 4/6), so retrieval width now scales with corpus size.
+- **2026-08-21 (Ontario signed)** — P11: `rules/ON.yaml` signed by Devlen M, with forfeiture timing from the MNDM relief-from-forfeiture policy. The offered reading was two days early — ground opens 10:00 on D+3, not D+1 — and D+3 is not clean title, because the Recorder's relief route survives a new registration where the Crown erred. Signing turned on `holding_schedule` ($2,090 for one cell over five years) but NOT `stakeable_now`, which the dossier had conflated and now separates.

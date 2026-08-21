@@ -105,16 +105,44 @@ def test_partial_is_not_reported_as_a_total():
           ["registration", "licence"])
 
 
-def test_real_ontario_refuses_until_verified():
+def test_real_ontario_after_signing():
+    """Ontario was signed on 2026-08-21, so this asserts the state that
+    replaced the refusal, not the refusal.
+
+    Two things must hold at once now. The arithmetic must run against the
+    sourced fees — that is the half of C1.2's acceptance a human sign-off
+    unlocks. And the gate must STILL be shut, because signing attested to the
+    fee schedule and the forfeiture timing, not to duty-to-consult or exempt
+    lands, which are still null. A signature is not a blanket clearance."""
+    rules = R.load("ON")
+    check("ON is signed", R.is_verified(rules), True)
+    check("signed by a person, not the placeholder",
+          rules.get("verified_by") not in (None, "", "human"), True)
+
+    # The arithmetic, against the four fees vis accepted on 2026-08-17:
+    #   registration $50/cell x 10                        =    500
+    #   assessment work $400/cell/yr x 10 cells x 5 years =  20,000
+    #   prospector's licence $40 per 5-year term          =     40
+    sched = R.holding_schedule("ON", 10, 5)
+    check("5-year hold of 10 cells computes", sched["grand_total"], 20540.0)
+    check("in Canadian dollars", sched["currency"], "CAD")
+
+    # Still shut, and for the right reasons.
     ok, missing = R.stakeable_now("ON")
-    check("ON not stakeable while unverified", ok, False)
-    check("sign-off named as missing",
-          any("verified_by" in m for m in missing), True)
-    try:
-        R.holding_schedule("ON", 10, 5)
-        check("holding_schedule refuses", "returned a value", "raised ValueError")
-    except ValueError:
-        check("holding_schedule refuses", "raised ValueError", "raised ValueError")
+    check("ON still not stakeable", ok, False)
+    check("sign-off no longer the blocker",
+          any("verified_by" in m for m in missing), False)
+    for field in ("consultation_notes", "exempt_lands_notes"):
+        check(f"{field} still named as missing",
+              any(field in m for m in missing), True)
+
+    # C1.6's numeric gate, sourced from the MNDM relief-from-forfeiture policy.
+    mech = rules["expiry_mechanics"]
+    check("no grace period after the due date", mech["grace_period_days"], 0)
+    check("ground reopens 3 days after the DUE DATE, not 1",
+          mech["reopening_delay_days"], 3)
+    check("relief from forfeiture is recorded as a residual risk",
+          bool(mech.get("relief_from_forfeiture", {}).get("exists")), True)
 
 
 def main():
@@ -122,7 +150,7 @@ def main():
                test_registration_scales_with_claims, test_licence_recurs,
                test_grand_total, test_missing_numbers_do_not_become_zero,
                test_partial_is_not_reported_as_a_total,
-               test_real_ontario_refuses_until_verified]:
+               test_real_ontario_after_signing]:
         print(f"\n{fn.__name__}")
         fn()
     print("\n" + ("-" * 60))
@@ -132,10 +160,15 @@ def main():
             print("  " + f)
         sys.exit(1)
     print("all arithmetic tests pass")
-    print("PENDING HUMAN STEP: fill rules/ON.yaml from the ministry fee page, "
-          "sign it, then run\n  python -m land.rules --schedule ON --claims 10 --years 5\n"
-          "and confirm the 5-year total against that page. That is the other half "
-          "of C1.2's acceptance.")
+    print("C1.2 acceptance: BOTH halves now done. The arithmetic is tested above, "
+          "and\nOntario was signed by Devlen M on 2026-08-21 after review.\n\n"
+          "STILL OPEN, and stakeable_now('ON') stays False until they are filled:\n"
+          "  consultation_notes   — duty-to-consult triggers for early exploration\n"
+          "  exempt_lands_notes   — exempt lands\n"
+          "  transfer.*           — the Ontario schedule has no claim-transfer fee;\n"
+          "                         item 8 is LEASE transfer and item 15 is instrument\n"
+          "                         recording, and calling either one it is\n"
+          "                         interpretation rather than citation (audit H).")
 
 
 if __name__ == "__main__":

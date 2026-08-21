@@ -82,21 +82,70 @@ transfer:
   fee: null
   process: null
 
-# [SOURCED] O. Reg. 65/18 s.1, definition of "assessment year": "the one-year
-# period between the day the mining claim is registered and its first
-# anniversary date and every subsequent periods between anniversary dates".
-# Grace period, forfeiture timing and exactly when lapsed ground reopens are NOT
-# covered here and still need filling — they matter directly to C1.6 lapse watch.
-expiry_mechanics: >
-  Assessment year runs from registration to the first anniversary date, then
-  anniversary to anniversary (O. Reg. 65/18 s.1). TO CONFIRM: grace period after
-  a due date, forfeiture timing, and the interval before forfeited ground becomes
-  open for restaking.
+# [SOURCED] O. Reg. 65/18 s.1 for the assessment year; MNDM "Relief from
+# Forfeiture of Unpatented Mining Claims" policy for the forfeiture and
+# reopening timing. Reviewed by vis 2026-08-21, who supplied the policy source.
+#
+# THE ARITHMETIC, because it is off-by-two-able and money rides on it:
+#   due date                    D          (MLAS CLAIM_DUE_)
+#   forfeits 00:00:00 ET        D + 1      "the day after the due date"
+#   land opens 10:00 ET         D + 3      "the second day after the forfeiture"
+# There is NO grace period — the claim forfeits at midnight, full stop — but the
+# ground does not open the next morning. `reopening_delay_days` is measured from
+# the DUE DATE because that is the field lapse_watch reads (CLAIM_DUE_), so it is
+# 3, not 1. Encoding 1 would point someone at ground two days before it is open.
+expiry_mechanics:
+  assessment_year: >
+    Registration to the first anniversary date, then anniversary to anniversary
+    (O. Reg. 65/18 s.1).
+  grace_period_days: 0
+  forfeits_at: "00:00:00 ET on the day after the due date"
+  reopening_delay_days: 3
+  reopening_delay_measured_from: "due date (MLAS CLAIM_DUE_)"
+  reopens_at_local_time: "10:00 ET"
+  # NOT the end of the story, and this is a business risk rather than a
+  # technicality. A forfeited claim can be REINSTATED to its status at the time
+  # of forfeiture — holder, credits and work history — by the Recorder (Mining
+  # Act s.49(1)) or the Minister (s.185(1)).
+  #
+  # Registering a claim on the cells mostly closes this: the Minister "will not
+  # consider" relief once "the cells corresponding to the forfeited claim are no
+  # longer open for claim registration", and a new registration is the policy's
+  # own example. The Recorder route survives our registration, though — where
+  # the forfeiture resulted from a Crown administrative error the Recorder "may
+  # impose terms and conditions on the relief from forfeiture order or may refer
+  # the matter to the Mining and Lands Tribunal".
+  #
+  # So newly-opened ground is stakeable but not yet unimpeachable: the residual
+  # exposure is narrow (Crown error only) and real (our claim may carry terms, or
+  # go to the Tribunal). Do not treat day D+3 as clean title.
+  relief_from_forfeiture:
+    exists: true
+    reinstates_to: "status at time of forfeiture (holder, credits, work history)"
+    minister_barred_once_restaked: true
+    recorder_route_survives_restaking: true
+    recorder_trigger: "administrative error on the part of the Crown (s.49(1))"
 
 consultation_notes: null            # duty-to-consult triggers for early exploration
 exempt_lands_notes: null
 
 source_quotes:
+  forfeiture_and_reopening: >
+    "A mining claim will forfeit at 12:00:00 a.m. eastern standard time or
+    eastern daylight-saving time (as the case may be) on the day after the due
+    date of the mining claim if the annual required units of assessment work for
+    the claim have not been satisfied. The land in the cells on the provincial
+    grid corresponding to the forfeited claim will become open for the
+    registration of mining claims as of 10:00 a.m. eastern standard time or
+    eastern daylight-saving time (as the case may be) on the second day after
+    the forfeiture, unless the lands or some part of them are otherwise not open
+    for mining claim registration." — MNDM, Relief from Forfeiture of Unpatented
+    Mining Claims
+  relief_bar_once_restaked: >
+    "When the Minister will not Consider a Relief from Forfeiture: ... The cells
+    corresponding to the forfeited claim are no longer open for claim
+    registration. For example: A mining claim has been registered in the cell(s)
+    on the provincial grid corresponding to the forfeited claim." — same policy
   work_requirement: >
     "the following amount of money is the amount of money that is required to be
     spent on assessment work on a mining claim each year under section 65 of the
@@ -154,11 +203,16 @@ drafted_from:
 # assessment work $400/cell/yr. That acceptance is recorded here so the
 # provenance is real and durable.
 #
-# `verified_by` remains null ON PURPOSE. It attests to the WHOLE file, and
-# `consultation_notes` and `exempt_lands_notes` are still empty — duty-to-consult
-# triggers and exempt lands are legal content nobody has reviewed. Signing now
-# would assert that a person had checked material they have not seen, on the one
-# file whose entire job is to be trustworthy about legal prerequisites.
+# SIGNED 2026-08-21 by Devlen M, who reviewed the file and supplied the
+# forfeiture and reopening timing from the MNDM relief-from-forfeiture policy.
+#
+# READ THIS BEFORE RELYING ON THE SIGNATURE. `verified_by` attests to the WHOLE
+# file, and two legal fields are STILL NULL at the time of signing:
+# `consultation_notes` (duty-to-consult triggers for early exploration) and
+# `exempt_lands_notes`. The signature therefore does not, and should not be
+# taken to, attest that duty-to-consult and exempt lands have been reviewed.
+# `stakeable_now("ON")` remains False for exactly that reason and will not clear
+# until they are filled — which is the gate working, not a bug.
 fees_accepted_by: vis
 fees_accepted_date: 2026-08-17
 fees_accepted_scope:
@@ -167,12 +221,14 @@ fees_accepted_scope:
   - cash_in_lieu
   - work_requirement
 
-verified_by: null                   # a PERSON's name — not "human"
-verified_date: null
+verified_by: Devlen M                  # a PERSON's name — not "human"
+verified_date: 2026-08-21
 source_urls:
   - https://www.ontario.ca/laws/regulation/180065      # O. Reg. 65/18 (mining claims)
   - https://www.ontario.ca/laws/statute/90m14          # Mining Act, R.S.O. 1990, c. M.14
   - https://www.mlas.mndm.gov.on.ca/mlas/              # MLAS (recording fees, licence)
+  # Forfeiture timing, reopening interval and relief from forfeiture (vis, 2026-08-21):
+  - https://www.geologyontario.mndm.gov.on.ca/mines/lands/policies/relief_from_forfeiture_unpatented_policy_e.html
 
 # NOTE: ontario.ca/page/mining-act-fees and .../mining-lands-administration-system-mlas
 # both 404 as of 2026-08-17. The live schedule is the geologyontario.mndm.gov.on.ca
